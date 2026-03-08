@@ -11,4 +11,32 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "./src") },
     conditions: ["@convex-dev/component-source"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+          if (id.includes("/convex/")) {
+            return "convex";
+          }
+          if (id.includes("@base-ui")) {
+            return "base-ui";
+          }
+          if (id.includes("@phosphor-icons")) {
+            return "icons";
+          }
+          if (
+            id.includes("class-variance-authority") ||
+            id.includes("clsx") ||
+            id.includes("tailwind-merge")
+          ) {
+            return "ui-utils";
+          }
+          return "vendor";
+        },
+      },
+    },
+  },
 });

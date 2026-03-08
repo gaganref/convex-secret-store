@@ -68,9 +68,11 @@ export function LoginPage() {
                   }}
                   placeholder="operator"
                   autoFocus
+                  autoComplete="username"
+                  spellCheck={false}
                 />
                 {error && (
-                  <p className="text-xs text-destructive">{error}</p>
+                  <p className="text-xs text-destructive" role="alert">{error}</p>
                 )}
               </div>
               <Button type="submit" className="w-full">

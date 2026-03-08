@@ -5,7 +5,6 @@ import { formatAbsoluteTime, formatCountLabel, formatRelativeTime } from "@/lib/
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
   CardAction,
@@ -20,22 +19,19 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@/components/ui/empty";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { MagnifyingGlass, FunnelSimple } from "@phosphor-icons/react";
-
-type Environment = "production" | "testing";
+import { MagnifyingGlass } from "@phosphor-icons/react";
+import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
 
 const EVENT_FILTERS = ["all", "created", "updated", "rotated", "deleted"] as const;
 type EventFilter = (typeof EVENT_FILTERS)[number];
 
-export function ActivityPage({ workspace }: { workspace: string }) {
-  const [environment, setEnvironment] = useState<Environment>("production");
+export function ActivityPage({
+  workspace,
+  environment,
+}: {
+  workspace: string;
+  environment: Environment;
+}) {
   const activity = useQuery(api.example.listActivity, {
     workspace,
     environment,
@@ -80,19 +76,11 @@ export function ActivityPage({ workspace }: { workspace: string }) {
             Audit trail for {workspace}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
-          <Select
-            value={environment}
-            onValueChange={(val) => setEnvironment(val as Environment)}
-          >
-            <SelectTrigger size="sm" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="production">Production</SelectItem>
-              <SelectItem value="testing">Testing</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>Scope:</span>
+          <Badge variant="outline">
+            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
+          </Badge>
         </div>
       </div>
 
@@ -148,7 +136,11 @@ export function ActivityPage({ workspace }: { workspace: string }) {
 
       {/* Events */}
       {activity === undefined ? (
-        <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+        <div
+          className="flex items-center justify-center py-12 text-muted-foreground gap-2"
+          role="status"
+          aria-live="polite"
+        >
           <Spinner />
           <span className="text-xs">Loading activity</span>
         </div>

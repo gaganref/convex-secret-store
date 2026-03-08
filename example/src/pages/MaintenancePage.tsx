@@ -8,7 +8,6 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,22 +19,20 @@ import {
   EmptyDescription,
 } from "@/components/ui/empty";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   ArrowsClockwise,
   Broom,
   Plant,
 } from "@phosphor-icons/react";
+import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
+import { getErrorMessage } from "@/lib/utils";
 
-type Environment = "production" | "testing";
-
-export function MaintenancePage({ workspace }: { workspace: string }) {
-  const [environment, setEnvironment] = useState<Environment>("production");
+export function MaintenancePage({
+  workspace,
+  environment,
+}: {
+  workspace: string;
+  environment: Environment;
+}) {
   const snapshot = useQuery(api.example.getMaintenanceSnapshot, {
     workspace,
     environment,
@@ -49,41 +46,61 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
     useState<Awaited<ReturnType<typeof runRotationBatch>> | null>(null);
   const [cleanupResult, setCleanupResult] =
     useState<Awaited<ReturnType<typeof runCleanup>> | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
 
   const legacyCount = useMemo(() => {
     return snapshot?.versionCounts.find((entry) => entry.keyVersion === 1)?.count ?? 0;
   }, [snapshot]);
+  const isOperating = operationState !== null;
 
   async function handleSeedLegacy() {
     setOperationState("Seeding legacy row");
-    await seedLegacyConnection({
-      workspace,
-      environment,
-      provider: "github",
-      value: "ghp_demo_legacy_token",
-    });
-    setOperationState(null);
+    setOperationError(null);
+    try {
+      await seedLegacyConnection({
+        workspace,
+        environment,
+        provider: "github",
+        value: "ghp_demo_legacy_token",
+      });
+    } catch (error) {
+      setOperationError(getErrorMessage(error, "Could not seed the legacy connection."));
+    } finally {
+      setOperationState(null);
+    }
   }
 
   async function handleRotate() {
     setOperationState("Running rotation batch");
-    const result = await runRotationBatch({
-      fromVersion: 1,
-      batchSize: 25,
-      cursor: null,
-    });
-    setRotationResult(result);
-    setOperationState(null);
+    setOperationError(null);
+    try {
+      const result = await runRotationBatch({
+        fromVersion: 1,
+        batchSize: 25,
+        cursor: null,
+      });
+      setRotationResult(result);
+    } catch (error) {
+      setOperationError(getErrorMessage(error, "Could not run the rotation batch."));
+    } finally {
+      setOperationState(null);
+    }
   }
 
   async function handleCleanup() {
     setOperationState("Running cleanup");
-    const result = await runCleanup({
-      batchSize: 50,
-      retentionMs: 30 * 24 * 60 * 60 * 1000,
-    });
-    setCleanupResult(result);
-    setOperationState(null);
+    setOperationError(null);
+    try {
+      const result = await runCleanup({
+        batchSize: 50,
+        retentionMs: 30 * 24 * 60 * 60 * 1000,
+      });
+      setCleanupResult(result);
+    } catch (error) {
+      setOperationError(getErrorMessage(error, "Could not run cleanup."));
+    } finally {
+      setOperationState(null);
+    }
   }
 
   return (
@@ -98,18 +115,12 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
             Operate the store without touching plaintext
           </h2>
         </div>
-        <Select
-          value={environment}
-          onValueChange={(val) => setEnvironment(val as Environment)}
-        >
-          <SelectTrigger size="sm" className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="production">Production</SelectItem>
-            <SelectItem value="testing">Testing</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>Viewing snapshot:</span>
+          <Badge variant="outline">
+            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
+          </Badge>
+        </div>
       </div>
 
       {/* Stats */}
@@ -146,7 +157,11 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
       </div>
 
       {snapshot === undefined ? (
-        <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+        <div
+          className="flex items-center justify-center py-12 text-muted-foreground gap-2"
+          role="status"
+          aria-live="polite"
+        >
           <Spinner />
           <span className="text-xs">Loading maintenance snapshot</span>
         </div>
@@ -196,16 +211,16 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
             </CardHeader>
             <CardContent>
               <CardDescription>
-                Seed a legacy row for demo, then run a batch rotation to rewrap DEKs onto the active KEK.
+                Seed a legacy row in the selected scope, then run a store-wide rotation batch to rewrap DEKs onto the active KEK.
               </CardDescription>
               <div className="flex flex-wrap gap-2 mt-3">
-                <Button size="xs" onClick={() => void handleSeedLegacy()}>
+                <Button size="xs" onClick={() => void handleSeedLegacy()} disabled={isOperating}>
                   <Plant size={12} data-icon="inline-start" />
                   Seed legacy
                 </Button>
-                <Button size="xs" variant="outline" onClick={() => void handleRotate()}>
+                <Button size="xs" variant="outline" onClick={() => void handleRotate()} disabled={isOperating}>
                   <ArrowsClockwise size={12} data-icon="inline-start" />
-                  Rotate v1 to v2
+                  Rotate all v1 rows
                 </Button>
               </div>
               {rotationResult && (
@@ -243,10 +258,10 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
             </CardHeader>
             <CardContent>
               <CardDescription>
-                Cleanup runs in bounded batches and writes a deleted event before removing each expired secret.
+                Cleanup is store-wide, runs in bounded batches, and writes a deleted event before removing each expired secret.
               </CardDescription>
               <div className="mt-3">
-                <Button size="xs" variant="outline" onClick={() => void handleCleanup()}>
+                <Button size="xs" variant="outline" onClick={() => void handleCleanup()} disabled={isOperating}>
                   <Broom size={12} data-icon="inline-start" />
                   Run cleanup batch
                 </Button>
@@ -275,10 +290,20 @@ export function MaintenancePage({ workspace }: { workspace: string }) {
       {operationState && (
         <Card size="sm">
           <CardContent>
-            <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="flex items-center gap-2 text-muted-foreground" role="status" aria-live="polite">
               <Spinner />
               <span className="text-xs">{operationState}...</span>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {operationError && (
+        <Card size="sm">
+          <CardContent>
+            <p className="text-xs text-destructive" role="alert">
+              {operationError}
+            </p>
           </CardContent>
         </Card>
       )}

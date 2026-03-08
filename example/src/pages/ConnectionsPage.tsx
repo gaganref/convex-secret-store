@@ -18,35 +18,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle,
-  EmptyDescription,
-} from "@/components/ui/empty";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Plus,
   PencilSimple,
   Trash,
-  ArrowsClockwise,
 } from "@phosphor-icons/react";
+import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
+import { getErrorMessage } from "@/lib/utils";
 
-type Environment = "production" | "testing";
 type Provider =
   | "openai"
   | "anthropic"
@@ -102,8 +88,13 @@ const PROVIDERS: Array<{
 type ConnectionRow =
   NonNullable<ReturnType<typeof useQuery<typeof api.example.listConnections>>>["page"][number];
 
-export function ConnectionsPage({ workspace }: { workspace: string }) {
-  const [environment, setEnvironment] = useState<Environment>("production");
+export function ConnectionsPage({
+  workspace,
+  environment,
+}: {
+  workspace: string;
+  environment: Environment;
+}) {
   const connections = useQuery(api.example.listConnections, {
     workspace,
     environment,
@@ -117,6 +108,7 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
   const [editTarget, setEditTarget] = useState<ConnectionRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Provider | null>(null);
   const [submitState, setSubmitState] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const byName = useMemo(() => {
     const rows = new Map<string, ConnectionRow>();
@@ -129,25 +121,36 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
   const configuredCount = connections?.page.length ?? 0;
   const expiredCount =
     connections?.page.filter((row) => row.effectiveState === "expired").length ?? 0;
+  const isSubmitting = submitState !== null;
 
   async function handleCreate(formData: FormData) {
     if (composeProvider === null) return;
     const ttlDaysRaw = String(formData.get("ttlDays") ?? "").trim();
     const ttlDays = ttlDaysRaw.length === 0 ? null : Number(ttlDaysRaw);
+    if (ttlDays !== null && (!Number.isFinite(ttlDays) || ttlDays <= 0)) {
+      setSubmitError("Expiry must be a positive number of days.");
+      return;
+    }
     const ttlMs = ttlDays === null ? null : ttlDays * 24 * 60 * 60 * 1000;
     setSubmitState("Saving");
-    await upsertConnection({
-      workspace,
-      environment,
-      provider: composeProvider,
-      value: String(formData.get("value") ?? ""),
-      label: String(formData.get("label") ?? "") || undefined,
-      owner: String(formData.get("owner") ?? "") || undefined,
-      notes: String(formData.get("notes") ?? "") || undefined,
-      ttlMs,
-    });
-    setSubmitState(null);
-    setComposeProvider(null);
+    setSubmitError(null);
+    try {
+      await upsertConnection({
+        workspace,
+        environment,
+        provider: composeProvider,
+        value: String(formData.get("value") ?? ""),
+        label: String(formData.get("label") ?? "") || undefined,
+        owner: String(formData.get("owner") ?? "") || undefined,
+        notes: String(formData.get("notes") ?? "") || undefined,
+        ttlMs,
+      });
+      setComposeProvider(null);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "Could not save the connection."));
+    } finally {
+      setSubmitState(null);
+    }
   }
 
   async function handleEdit(formData: FormData) {
@@ -155,26 +158,42 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
     const expiresAtInput = String(formData.get("expiresAt") ?? "").trim();
     const expiresAt =
       expiresAtInput.length === 0 ? null : new Date(expiresAtInput).getTime();
+    if (expiresAt !== null && Number.isNaN(expiresAt)) {
+      setSubmitError("Expiry must be a valid date and time.");
+      return;
+    }
     setSubmitState("Updating");
-    await updateConnection({
-      workspace,
-      environment,
-      provider: editTarget.name as Provider,
-      label: String(formData.get("label") ?? "") || null,
-      owner: String(formData.get("owner") ?? "") || null,
-      notes: String(formData.get("notes") ?? "") || null,
-      expiresAt,
-    });
-    setSubmitState(null);
-    setEditTarget(null);
+    setSubmitError(null);
+    try {
+      await updateConnection({
+        workspace,
+        environment,
+        provider: editTarget.name as Provider,
+        label: String(formData.get("label") ?? "") || null,
+        owner: String(formData.get("owner") ?? "") || null,
+        notes: String(formData.get("notes") ?? "") || null,
+        expiresAt,
+      });
+      setEditTarget(null);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "Could not update the connection."));
+    } finally {
+      setSubmitState(null);
+    }
   }
 
   async function handleDelete() {
     if (deleteTarget === null) return;
     setSubmitState("Removing");
-    await removeConnection({ workspace, environment, provider: deleteTarget });
-    setSubmitState(null);
-    setDeleteTarget(null);
+    setSubmitError(null);
+    try {
+      await removeConnection({ workspace, environment, provider: deleteTarget });
+      setDeleteTarget(null);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "Could not remove the connection."));
+    } finally {
+      setSubmitState(null);
+    }
   }
 
   return (
@@ -189,22 +208,11 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
             Provider credentials for {workspace}
           </h2>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Environment:</span>
-            <Select
-              value={environment}
-              onValueChange={(val) => setEnvironment(val as Environment)}
-            >
-              <SelectTrigger size="sm" className="w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="production">Production</SelectItem>
-                <SelectItem value="testing">Testing</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>Scope:</span>
+          <Badge variant="outline">
+            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
+          </Badge>
         </div>
       </div>
 
@@ -235,7 +243,11 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
 
       {/* Provider grid */}
       {connections === undefined ? (
-        <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+        <div
+          className="flex items-center justify-center py-12 text-muted-foreground gap-2"
+          role="status"
+          aria-live="polite"
+        >
           <Spinner />
           <span className="text-xs">Loading connections</span>
         </div>
@@ -306,15 +318,25 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
                 </CardContent>
 
                 <CardFooter className="gap-2">
-                  <Button size="xs" onClick={() => setComposeProvider(provider.name)}>
+                  <Button
+                    size="xs"
+                    onClick={() => {
+                      setSubmitError(null);
+                      setComposeProvider(provider.name);
+                    }}
+                    disabled={isSubmitting}
+                  >
                     <Plus size={12} data-icon="inline-start" />
                     {isConfigured ? "Replace" : "Add"}
                   </Button>
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={() => setEditTarget(row ?? null)}
-                    disabled={!isConfigured}
+                    onClick={() => {
+                      setSubmitError(null);
+                      setEditTarget(row ?? null);
+                    }}
+                    disabled={isSubmitting || !isConfigured}
                   >
                     <PencilSimple size={12} data-icon="inline-start" />
                     Edit
@@ -322,8 +344,11 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
                   <Button
                     size="xs"
                     variant="destructive"
-                    onClick={() => setDeleteTarget(provider.name)}
-                    disabled={!isConfigured}
+                    onClick={() => {
+                      setSubmitError(null);
+                      setDeleteTarget(provider.name);
+                    }}
+                    disabled={isSubmitting || !isConfigured}
                   >
                     <Trash size={12} data-icon="inline-start" />
                     Remove
@@ -338,7 +363,12 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
       {/* Add/Replace Dialog */}
       <Dialog
         open={composeProvider !== null}
-        onOpenChange={(open) => !open && setComposeProvider(null)}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            setComposeProvider(null);
+            setSubmitError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -358,45 +388,58 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
               void handleCreate(new FormData(e.currentTarget));
             }}
           >
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="value">Secret value</Label>
-              <Textarea name="value" id="value" rows={3} required placeholder="Paste the credential" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="label">Label</Label>
-              <Input
-                name="label"
-                id="label"
-                defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.label ?? "" : ""}
-                placeholder="Primary production token"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="owner">Owner</Label>
-              <Input
-                name="owner"
-                id="owner"
-                defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.owner ?? "" : ""}
-                placeholder="platform"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                name="notes"
-                id="notes"
-                rows={2}
-                defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
-                placeholder="Optional context"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ttlDays">Expire after days</Label>
-              <Input name="ttlDays" id="ttlDays" type="number" min="1" step="1" placeholder="Leave blank for no expiry" />
-            </div>
+            <fieldset disabled={isSubmitting} className="contents">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="value">Secret value</Label>
+                <Textarea name="value" id="value" rows={3} required placeholder="Paste the credential" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="label">Label</Label>
+                <Input
+                  name="label"
+                  id="label"
+                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.label ?? "" : ""}
+                  placeholder="Primary production token"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="owner">Owner</Label>
+                <Input
+                  name="owner"
+                  id="owner"
+                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.owner ?? "" : ""}
+                  placeholder="platform"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  name="notes"
+                  id="notes"
+                  rows={2}
+                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
+                  placeholder="Optional context"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="ttlDays">Expire after days</Label>
+                <Input name="ttlDays" id="ttlDays" type="number" min="1" step="1" placeholder="Leave blank for no expiry" />
+              </div>
+            </fieldset>
             <DialogFooter>
-              {submitState && <span className="text-xs text-muted-foreground mr-auto">{submitState}...</span>}
-              <Button type="submit">
+              <div className="mr-auto flex flex-col gap-1">
+                {submitState && (
+                  <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                    {submitState}...
+                  </span>
+                )}
+                {submitError && (
+                  <span className="text-xs text-destructive" role="alert">
+                    {submitError}
+                  </span>
+                )}
+              </div>
+              <Button type="submit" disabled={isSubmitting}>
                 {byName.has(composeProvider ?? "") ? "Replace secret" : "Save secret"}
               </Button>
             </DialogFooter>
@@ -407,7 +450,12 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
       {/* Edit Dialog */}
       <Dialog
         open={editTarget !== null}
-        onOpenChange={(open) => !open && setEditTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            setEditTarget(null);
+            setSubmitError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -425,34 +473,47 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
               void handleEdit(new FormData(e.currentTarget));
             }}
           >
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-label">Label</Label>
-              <Input name="label" id="edit-label" defaultValue={editTarget?.metadata?.label ?? ""} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-owner">Owner</Label>
-              <Input name="owner" id="edit-owner" defaultValue={editTarget?.metadata?.owner ?? ""} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-notes">Notes</Label>
-              <Textarea name="notes" id="edit-notes" rows={3} defaultValue={editTarget?.metadata?.notes ?? ""} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="edit-expiresAt">Absolute expiry</Label>
-              <Input
-                name="expiresAt"
-                id="edit-expiresAt"
-                type="datetime-local"
-                defaultValue={
-                  editTarget?.expiresAt
-                    ? new Date(editTarget.expiresAt).toISOString().slice(0, 16)
-                    : ""
-                }
-              />
-            </div>
+            <fieldset disabled={isSubmitting} className="contents">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-label">Label</Label>
+                <Input name="label" id="edit-label" defaultValue={editTarget?.metadata?.label ?? ""} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-owner">Owner</Label>
+                <Input name="owner" id="edit-owner" defaultValue={editTarget?.metadata?.owner ?? ""} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-notes">Notes</Label>
+                <Textarea name="notes" id="edit-notes" rows={3} defaultValue={editTarget?.metadata?.notes ?? ""} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="edit-expiresAt">Absolute expiry</Label>
+                <Input
+                  name="expiresAt"
+                  id="edit-expiresAt"
+                  type="datetime-local"
+                  defaultValue={
+                    editTarget?.expiresAt
+                      ? new Date(editTarget.expiresAt).toISOString().slice(0, 16)
+                      : ""
+                  }
+                />
+              </div>
+            </fieldset>
             <DialogFooter>
-              {submitState && <span className="text-xs text-muted-foreground mr-auto">{submitState}...</span>}
-              <Button type="submit">Save details</Button>
+              <div className="mr-auto flex flex-col gap-1">
+                {submitState && (
+                  <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                    {submitState}...
+                  </span>
+                )}
+                {submitError && (
+                  <span className="text-xs text-destructive" role="alert">
+                    {submitError}
+                  </span>
+                )}
+              </div>
+              <Button type="submit" disabled={isSubmitting}>Save details</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -461,7 +522,12 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
       {/* Delete Dialog */}
       <Dialog
         open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            setDeleteTarget(null);
+            setSubmitError(null);
+          }
+        }}
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -471,10 +537,17 @@ export function ConnectionsPage({ workspace }: { workspace: string }) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <div className="mr-auto">
+              {submitError && (
+                <span className="text-xs text-destructive" role="alert">
+                  {submitError}
+                </span>
+              )}
+            </div>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()}>
+            <Button variant="destructive" onClick={() => void handleDelete()} disabled={isSubmitting}>
               {submitState ? "Removing..." : "Remove connection"}
             </Button>
           </DialogFooter>

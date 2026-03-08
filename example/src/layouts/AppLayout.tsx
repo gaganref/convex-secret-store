@@ -25,14 +25,23 @@ import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { useAuth } from "@/context/AuthContext";
+import {
+  ENVIRONMENT_OPTIONS,
+  type Environment,
+  type Page,
+} from "@/lib/navigation";
 import type { ReactNode } from "react";
-
-export type Page = "connections" | "activity" | "maintenance";
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof Vault }[] = [
   { id: "connections", label: "Connections", icon: PlugsConnected },
@@ -42,17 +51,31 @@ const NAV_ITEMS: { id: Page; label: string; icon: typeof Vault }[] = [
 
 type AppLayoutProps = {
   page: Page;
+  environment: Environment;
   onNavigate: (page: Page) => void;
+  onEnvironmentChange: (environment: Environment) => void;
   children: ReactNode;
 };
 
-export function AppLayout({ page, onNavigate, children }: AppLayoutProps) {
+export function AppLayout({
+  page,
+  environment,
+  onNavigate,
+  onEnvironmentChange,
+  children,
+}: AppLayoutProps) {
   const { username, logout } = useAuth();
   const currentNav = NAV_ITEMS.find((n) => n.id === page);
   const CurrentIcon = currentNav?.icon;
 
   return (
     <SidebarProvider>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:border focus:bg-background focus:px-3 focus:py-2 focus:text-xs"
+      >
+        Skip to content
+      </a>
       <Sidebar>
         <SidebarHeader className="px-4 py-3.5">
           <div className="flex items-center gap-2.5">
@@ -108,23 +131,22 @@ export function AppLayout({ page, onNavigate, children }: AppLayoutProps) {
             <span className="flex-1 text-xs text-muted-foreground truncate">
               {username}
             </span>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6 shrink-0"
-                      onClick={logout}
-                    />
-                  }
-                >
-                  <SignOut size={12} />
-                </TooltipTrigger>
-                <TooltipContent side="right">Sign out</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 shrink-0"
+                    onClick={logout}
+                    aria-label="Sign out"
+                  />
+                }
+              >
+                <SignOut size={12} />
+              </TooltipTrigger>
+              <TooltipContent side="right">Sign out</TooltipContent>
+            </Tooltip>
           </div>
           <div className="px-1">
             <ThemeSwitcher />
@@ -139,8 +161,28 @@ export function AppLayout({ page, onNavigate, children }: AppLayoutProps) {
             <CurrentIcon size={14} className="text-muted-foreground shrink-0" />
           )}
           <span className="text-sm font-medium">{currentNav?.label}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="hidden text-[10px] uppercase tracking-widest text-muted-foreground sm:inline">
+              Scope
+            </span>
+            <Select
+              value={environment}
+              onValueChange={(value) => onEnvironmentChange(value as Environment)}
+            >
+              <SelectTrigger size="sm" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ENVIRONMENT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </header>
-        <main className="flex-1 overflow-auto p-4 md:p-6">
+        <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6">
           <div className="mx-auto w-full lg:w-[90%] xl:w-[85%]">{children}</div>
         </main>
       </SidebarInset>

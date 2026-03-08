@@ -194,25 +194,25 @@ describe("error and option contracts", () => {
 });
 
 test("client type contracts remain stable", () => {
-  const baseClient = new SecretStore(components.secretStore, {
+  const _baseClient = new SecretStore(components.secretStore, {
     keys: [{ version: 1, value: KEY_V1 }],
   });
 
-  type BasePutArgs = Parameters<typeof baseClient.put>[1];
+  type BasePutArgs = Parameters<typeof _baseClient.put>[1];
   const basePutArgs: BasePutArgs = {
     name: "openai",
     value: "sk",
   };
   void basePutArgs;
 
-  const namespacedClient = new SecretStore<{ namespace: `env:${string}` }>(
+  const _namespacedClient = new SecretStore<{ namespace: `env:${string}` }>(
     components.secretStore,
     {
       keys: [{ version: 1, value: KEY_V1 }],
     },
   );
 
-  type NamespacedPutArgs = Parameters<typeof namespacedClient.put>[1];
+  type NamespacedPutArgs = Parameters<typeof _namespacedClient.put>[1];
   const validNamespacedArgs: NamespacedPutArgs = {
     namespace: "env:prod",
     name: "openai",
@@ -226,13 +226,13 @@ test("client type contracts remain stable", () => {
   const missingNamespace: NamespacedPutArgs = { name: "openai", value: "sk" };
   void missingNamespace;
 
-  const metadataClient = new SecretStore<{
+  const _metadataClient = new SecretStore<{
     metadata: { provider: "openai" | "stripe"; label?: string };
   }>(components.secretStore, {
     keys: [{ version: 1, value: KEY_V1 }],
   });
 
-  type MetadataPutArgs = Parameters<typeof metadataClient.put>[1];
+  type MetadataPutArgs = Parameters<typeof _metadataClient.put>[1];
   const metadataArgs: MetadataPutArgs = {
     name: "stripe",
     value: "sk",
