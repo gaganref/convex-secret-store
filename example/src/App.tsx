@@ -1,18 +1,32 @@
-import "./App.css";
+import { useState } from "react";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { AppLayout, type Page } from "@/layouts/AppLayout";
+import { LoginPage } from "@/pages/LoginPage";
+import { ConnectionsPage } from "@/pages/ConnectionsPage";
+import { ActivityPage } from "@/pages/ActivityPage";
+import { MaintenancePage } from "@/pages/MaintenancePage";
 
-function App() {
+function AppContent() {
+  const { username } = useAuth();
+  const [page, setPage] = useState<Page>("connections");
+
+  if (!username) {
+    return <LoginPage />;
+  }
+
   return (
-    <main className="card">
-      <h1>Integration Vault</h1>
-      <p>
-        The example app is being rebuilt around the secret-store component.
-      </p>
-      <p>
-        This placeholder keeps the example package compiling while the full
-        Connections, Activity, and Maintenance UI is implemented.
-      </p>
-    </main>
+    <AppLayout page={page} onNavigate={setPage}>
+      {page === "connections" && <ConnectionsPage workspace={username} />}
+      {page === "activity" && <ActivityPage workspace={username} />}
+      {page === "maintenance" && <MaintenancePage workspace={username} />}
+    </AppLayout>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}

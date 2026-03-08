@@ -43,6 +43,70 @@ describe("example", () => {
     expect(events.page[0]?.type).toBe("created");
   });
 
+  test("updateConnection changes metadata without replacing the secret value", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.upsertConnection, {
+      workspace: "acme",
+      environment: "testing",
+      provider: "resend",
+      value: "re_test",
+      label: "Original",
+    });
+
+    const updated = await t.mutation(api.example.updateConnection, {
+      workspace: "acme",
+      environment: "testing",
+      provider: "resend",
+      label: "Updated label",
+      owner: "platform",
+      notes: "Rotates quarterly",
+      expiresAt: null,
+    });
+
+    expect(updated.updated).toBe(true);
+
+    const connections = await t.query(api.example.listConnections, {
+      workspace: "acme",
+      environment: "testing",
+      paginationOpts: { numItems: 20, cursor: null },
+    });
+    expect(connections.page[0]?.metadata).toEqual({
+      provider: "resend",
+      label: "Updated label",
+      owner: "platform",
+      notes: "Rotates quarterly",
+    });
+  });
+
+  test("seedLegacyConnection and runRotationBatch move a secret to the active version", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.seedLegacyConnection, {
+      workspace: "acme",
+      environment: "production",
+      provider: "stripe",
+      value: "sk_live_legacy",
+    });
+
+    const before = await t.query(api.example.getMaintenanceSnapshot, {
+      workspace: "acme",
+      environment: "production",
+    });
+    expect(before.versionCounts).toContainEqual({ keyVersion: 1, count: 1 });
+
+    const rotated = await t.mutation(api.example.runRotationBatch, {
+      fromVersion: 1,
+      batchSize: 20,
+      cursor: null,
+    });
+    expect(rotated.rotated).toBe(1);
+
+    const after = await t.query(api.example.getMaintenanceSnapshot, {
+      workspace: "acme",
+      environment: "production",
+    });
+    expect(after.versionCounts).toContainEqual({ keyVersion: 2, count: 1 });
+  });
+
   test("removeConnection deletes the secret", async () => {
     const t = initConvexTest();
     await t.mutation(api.example.upsertConnection, {
