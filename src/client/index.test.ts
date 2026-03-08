@@ -1,36 +1,244 @@
-import { describe, expect, test } from "vitest";
-import { exposeApi } from "./index.js";
-import { anyApi, type ApiFromModules } from "convex/server";
+import { afterEach, describe, expect, expectTypeOf, test, vi } from "vitest";
+import {
+  SecretStore,
+  SecretStoreClientError,
+  isSecretStoreClientError,
+} from "./index.js";
+import { normalizeSecretStoreOptions } from "./options.js";
 import { components, initConvexTest } from "./setup.test.js";
+import type { RunMutationCtx, RunQueryCtx } from "./types.js";
 
-export const { add, list } = exposeApi(components.secretStore, {
-  auth: async (ctx, _operation) => {
-    return (await ctx.auth.getUserIdentity())?.subject ?? "anonymous";
-  },
-  baseUrl: "https://pirate.monkeyness.com",
+const KEY_V1 = Buffer.alloc(32, 1).toString("base64");
+const KEY_V2 = Buffer.alloc(32, 2).toString("base64");
+
+function ctxFrom(t: ReturnType<typeof initConvexTest>) {
+  const mutationCtx: RunMutationCtx = {
+    runMutation: (mutation, args) => t.mutation(mutation, args),
+  };
+  const queryCtx: RunQueryCtx = {
+    runQuery: (query, args) => t.query(query, args),
+  };
+  return { mutationCtx, queryCtx, ctx: { ...mutationCtx, ...queryCtx } };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
-const testApi = (
-  anyApi as unknown as ApiFromModules<{
-    "index.test": {
-      add: typeof add;
-      list: typeof list;
-    };
-  }>
-)["index.test"];
+describe("SecretStore client", () => {
+  test("constructs a typed client", () => {
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
 
-describe("client tests", () => {
-  test("should be able to use client", async () => {
-    const t = initConvexTest().withIdentity({
-      subject: "user1",
-    });
-    const targetId = "test-subject-1";
-    await t.mutation(testApi.add, {
-      text: "My first comment",
-      targetId: targetId,
-    });
-    const comments = await t.query(testApi.list, { targetId });
-    expect(comments).toHaveLength(1);
-    expect(comments[0].text).toBe("My first comment");
+    expect(client).toBeInstanceOf(SecretStore);
+    expect(client.options.activeVersion).toBe(1);
   });
+
+  test("put/get round-trips a secret value", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const client = new SecretStore<{
+      namespace: string;
+      metadata: { provider: string };
+    }>(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    const created = await client.put(mutationCtx, {
+      namespace: "acme:production",
+      name: "openai",
+      value: "sk-secret",
+      metadata: { provider: "openai" },
+    });
+
+    expect(created.isNew).toBe(true);
+
+    const loaded = await client.get(queryCtx, {
+      namespace: "acme:production",
+      name: "openai",
+    });
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value).toBe("sk-secret");
+    expect(loaded.metadata).toEqual({ provider: "openai" });
+  });
+
+  test("returns key_version_unavailable when ciphertext version is not configured", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const initial = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    await initial.put(mutationCtx, {
+      name: "stripe",
+      value: "sk_live_123",
+    });
+
+    const rotatedOut = new SecretStore(components.secretStore, {
+      keys: [{ version: 2, value: KEY_V2 }],
+    });
+
+    const result = await rotatedOut.get(queryCtx, { name: "stripe" });
+    expect(result).toEqual({ ok: false, reason: "key_version_unavailable" });
+  });
+
+  test("rotateKeys rewraps rows to the active version", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx, ctx } = ctxFrom(t);
+    const v1Client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    await v1Client.put(mutationCtx, {
+      name: "resend",
+      value: "re_123",
+    });
+
+    const rotatingClient = new SecretStore(components.secretStore, {
+      keys: [
+        { version: 2, value: KEY_V2 },
+        { version: 1, value: KEY_V1 },
+      ],
+    });
+
+    const rotated = await rotatingClient.rotateKeys(ctx, {
+      fromVersion: 1,
+      batchSize: 10,
+      cursor: null,
+    });
+
+    expect(rotated.processed).toBe(1);
+    expect(rotated.rotated).toBe(1);
+    expect(rotated.skipped).toBe(0);
+
+    const listed = await rotatingClient.list(queryCtx, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(listed.page[0]?.keyVersion).toBe(2);
+
+    const activeOnlyClient = new SecretStore(components.secretStore, {
+      keys: [{ version: 2, value: KEY_V2 }],
+    });
+    const loaded = await activeOnlyClient.get(queryCtx, { name: "resend" });
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value).toBe("re_123");
+  });
+
+  test("listEvents rejects name + type in the client surface", async () => {
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+    const ctx: RunQueryCtx = {
+      runQuery: async () => {
+        throw new Error("should not be called");
+      },
+    };
+
+    await expect(
+      client.listEvents(ctx, {
+        name: "openai",
+        type: "created",
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+  });
+});
+
+describe("error and option contracts", () => {
+  test("normalizeSecretStoreOptions validates keys and defaults", () => {
+    const normalized = normalizeSecretStoreOptions({
+      keys: [{ version: 7, value: KEY_V1 }],
+      defaults: { ttlMs: 60_000 },
+      logLevel: "debug",
+    });
+
+    expect(normalized.activeVersion).toBe(7);
+    expect(normalized.defaults.ttlMs).toBe(60_000);
+    expect(normalized.logLevel).toBe("debug");
+  });
+
+  test("constructor throws typed INVALID_OPTIONS", () => {
+    expect(
+      () =>
+        new SecretStore(components.secretStore, {
+          keys: [],
+        }),
+    ).toThrow(SecretStoreClientError);
+  });
+
+  test("operation failures preserve cause", async () => {
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+      logLevel: "none",
+    });
+    const ctx: RunQueryCtx = {
+      runQuery: async () => {
+        throw new Error("db down");
+      },
+    };
+
+    const error = await client.get(ctx, { name: "missing" }).catch((e) => e);
+    expect(isSecretStoreClientError(error)).toBe(true);
+    if (isSecretStoreClientError(error)) {
+      expect(error.code).toBe("OPERATION_FAILED");
+      expect(error.cause).toBeInstanceOf(Error);
+    }
+  });
+});
+
+test("client type contracts remain stable", () => {
+  const baseClient = new SecretStore(components.secretStore, {
+    keys: [{ version: 1, value: KEY_V1 }],
+  });
+
+  type BasePutArgs = Parameters<typeof baseClient.put>[1];
+  const basePutArgs: BasePutArgs = {
+    name: "openai",
+    value: "sk",
+  };
+  void basePutArgs;
+
+  const namespacedClient = new SecretStore<{ namespace: `env:${string}` }>(
+    components.secretStore,
+    {
+      keys: [{ version: 1, value: KEY_V1 }],
+    },
+  );
+
+  type NamespacedPutArgs = Parameters<typeof namespacedClient.put>[1];
+  const validNamespacedArgs: NamespacedPutArgs = {
+    namespace: "env:prod",
+    name: "openai",
+    value: "sk",
+  };
+  expectTypeOf(validNamespacedArgs.namespace).toEqualTypeOf<
+    `env:${string}`
+  >();
+
+  // @ts-expect-error namespace is required when configured in the generic.
+  const missingNamespace: NamespacedPutArgs = { name: "openai", value: "sk" };
+  void missingNamespace;
+
+  const metadataClient = new SecretStore<{
+    metadata: { provider: "openai" | "stripe"; label?: string };
+  }>(components.secretStore, {
+    keys: [{ version: 1, value: KEY_V1 }],
+  });
+
+  type MetadataPutArgs = Parameters<typeof metadataClient.put>[1];
+  const metadataArgs: MetadataPutArgs = {
+    name: "stripe",
+    value: "sk",
+    metadata: { provider: "stripe", label: "primary" },
+  };
+  expectTypeOf(metadataArgs.metadata?.provider).toEqualTypeOf<
+    "openai" | "stripe" | undefined
+  >();
 });

@@ -1,58 +1,144 @@
-import { action, mutation, query } from "./_generated/server.js";
+import { paginationOptsValidator } from "convex/server";
+import { mutation, query } from "./_generated/server.js";
 import { components } from "./_generated/api.js";
-import { exposeApi } from "@gaganref/convex-secret-store";
 import { v } from "convex/values";
-import { Auth } from "convex/server";
+import { SecretStore } from "@gaganref/convex-secret-store";
 
-// Environment variables aren't available in the component,
-// so we need to pass it in as an argument to the component when necessary.
-const BASE_URL = process.env.BASE_URL ?? "https://pirate.monkeyness.com";
+const DEMO_KEY_V1 = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
-export const addComment = mutation({
-  args: { text: v.string(), targetId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(components.secretStore.lib.add, {
-      text: args.text,
-      targetId: args.targetId,
-      userId: await getAuthUserId(ctx),
-    });
-  },
+export const environmentValidator = v.union(
+  v.literal("production"),
+  v.literal("testing"),
+);
+
+export const providerValidator = v.union(
+  v.literal("openai"),
+  v.literal("anthropic"),
+  v.literal("resend"),
+  v.literal("stripe"),
+  v.literal("slack"),
+  v.literal("github"),
+);
+
+export type Namespace = `${string}:${"production" | "testing"}`;
+
+const secrets = new SecretStore<{
+  namespace: Namespace;
+  metadata: {
+    provider:
+      | "openai"
+      | "anthropic"
+      | "resend"
+      | "stripe"
+      | "slack"
+      | "github";
+    label?: string;
+    owner?: string;
+    notes?: string;
+  };
+}>(components.secretStore, {
+  keys: [{ version: 1, value: DEMO_KEY_V1 }],
 });
 
-export const listComments = query({
-  args: { targetId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.runQuery(components.secretStore.lib.list, {
-      targetId: args.targetId,
-    });
-  },
-});
-
-export const translateComment = action({
-  args: { commentId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.runAction(components.secretStore.lib.translate, {
-      baseUrl: BASE_URL,
-      commentId: args.commentId,
-    });
-  },
-});
-
-// Here is an alternative way to use the component's methods directly by re-exporting
-// the component's API:
-export const { list, add, translate } = exposeApi(components.secretStore, {
-  auth: async (ctx, operation) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null && operation.type !== "read") {
-      throw new Error("Unauthorized");
-    }
-    return userId;
-  },
-  baseUrl: BASE_URL,
-});
-
-// You can also register HTTP routes for the component. See http.ts for an example.
-
-async function getAuthUserId(ctx: { auth: Auth }) {
-  return (await ctx.auth.getUserIdentity())?.subject ?? "anonymous";
+function toNamespace(
+  workspace: string,
+  environment: "production" | "testing",
+): Namespace {
+  const trimmed = workspace.trim();
+  if (trimmed.length === 0) {
+    throw new Error("workspace must not be empty");
+  }
+  return `${trimmed}:${environment}` as Namespace;
 }
+
+export const upsertConnection = mutation({
+  args: {
+    workspace: v.string(),
+    environment: environmentValidator,
+    provider: providerValidator,
+    value: v.string(),
+    label: v.optional(v.string()),
+    owner: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    ttlMs: v.optional(v.union(v.number(), v.null())),
+  },
+  returns: {
+    secretId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.optional(v.number()),
+    isNew: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    return await secrets.put(ctx, {
+      namespace: toNamespace(args.workspace, args.environment),
+      name: args.provider,
+      value: args.value,
+      ttlMs: args.ttlMs,
+      metadata: {
+        provider: args.provider,
+        label: args.label,
+        owner: args.owner,
+        notes: args.notes,
+      },
+    });
+  },
+});
+
+export const listConnections = query({
+  args: {
+    workspace: v.string(),
+    environment: environmentValidator,
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await secrets.list(ctx, {
+      namespace: toNamespace(args.workspace, args.environment),
+      paginationOpts: args.paginationOpts,
+    });
+  },
+});
+
+export const listActivity = query({
+  args: {
+    workspace: v.string(),
+    environment: environmentValidator,
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await secrets.listEvents(ctx, {
+      namespace: toNamespace(args.workspace, args.environment),
+      paginationOpts: args.paginationOpts,
+    });
+  },
+});
+
+export const removeConnection = mutation({
+  args: {
+    workspace: v.string(),
+    environment: environmentValidator,
+    provider: providerValidator,
+  },
+  returns: { removed: v.boolean() },
+  handler: async (ctx, args) => {
+    return await secrets.remove(ctx, {
+      namespace: toNamespace(args.workspace, args.environment),
+      name: args.provider,
+    });
+  },
+});
+
+export const runCleanup = mutation({
+  args: {
+    retentionMs: v.optional(v.number()),
+    batchSize: v.optional(v.number()),
+  },
+  returns: {
+    deletedSecrets: v.number(),
+    deletedEvents: v.number(),
+    isDone: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    return await secrets.cleanup(ctx, args);
+  },
+});
