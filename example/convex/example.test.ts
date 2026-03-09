@@ -11,29 +11,24 @@ describe("example", () => {
     vi.useRealTimers();
   });
 
-  test("upsertConnection stores a connection and records activity", async () => {
+  test("putSecret stores a secret and records activity", async () => {
     const t = initConvexTest();
-    const created = await t.mutation(api.example.upsertConnection, {
+    const created = await t.mutation(api.example.putSecret, {
       workspace: "acme",
       environment: "production",
-      provider: "openai",
-      value: "sk-test",
-      label: "Primary OpenAI key",
+      name: "DATABASE_URL",
+      value: "postgresql://user:pass@db.example.com:5432/myapp",
     });
 
     expect(created.secretId).toBeDefined();
 
-    const connections = await t.query(api.example.listConnections, {
+    const secrets = await t.query(api.example.listSecrets, {
       workspace: "acme",
       environment: "production",
       paginationOpts: { numItems: 20, cursor: null },
     });
-    expect(connections.page).toHaveLength(1);
-    expect(connections.page[0]?.name).toBe("openai");
-    expect(connections.page[0]?.metadata).toEqual({
-      provider: "openai",
-      label: "Primary OpenAI key",
-    });
+    expect(secrets.page).toHaveLength(1);
+    expect(secrets.page[0]?.name).toBe("DATABASE_URL");
 
     const events = await t.query(api.example.listActivity, {
       workspace: "acme",
@@ -43,51 +38,16 @@ describe("example", () => {
     expect(events.page[0]?.type).toBe("created");
   });
 
-  test("updateConnection changes metadata without replacing the secret value", async () => {
+  test("seedLegacySecret and runRotationBatch move a secret to the active version", async () => {
     const t = initConvexTest();
-    await t.mutation(api.example.upsertConnection, {
-      workspace: "acme",
-      environment: "testing",
-      provider: "resend",
-      value: "re_test",
-      label: "Original",
-    });
-
-    const updated = await t.mutation(api.example.updateConnection, {
-      workspace: "acme",
-      environment: "testing",
-      provider: "resend",
-      label: "Updated label",
-      owner: "platform",
-      notes: "Rotates quarterly",
-      expiresAt: null,
-    });
-
-    expect(updated.updated).toBe(true);
-
-    const connections = await t.query(api.example.listConnections, {
-      workspace: "acme",
-      environment: "testing",
-      paginationOpts: { numItems: 20, cursor: null },
-    });
-    expect(connections.page[0]?.metadata).toEqual({
-      provider: "resend",
-      label: "Updated label",
-      owner: "platform",
-      notes: "Rotates quarterly",
-    });
-  });
-
-  test("seedLegacyConnection and runRotationBatch move a secret to the active version", async () => {
-    const t = initConvexTest();
-    await t.mutation(api.example.seedLegacyConnection, {
+    await t.mutation(api.example.seedLegacySecret, {
       workspace: "acme",
       environment: "production",
-      provider: "stripe",
-      value: "sk_live_legacy",
+      name: "JWT_SIGNING_KEY",
+      value: "legacy-key-value",
     });
 
-    const before = await t.query(api.example.getMaintenanceSnapshot, {
+    const before = await t.query(api.example.getSettingsSnapshot, {
       workspace: "acme",
       environment: "production",
     });
@@ -100,60 +60,78 @@ describe("example", () => {
     });
     expect(rotated.rotated).toBe(1);
 
-    const after = await t.query(api.example.getMaintenanceSnapshot, {
+    const after = await t.query(api.example.getSettingsSnapshot, {
       workspace: "acme",
       environment: "production",
     });
     expect(after.versionCounts).toContainEqual({ keyVersion: 2, count: 1 });
   });
 
-  test("removeConnection deletes the secret", async () => {
+  test("removeSecret deletes the secret", async () => {
     const t = initConvexTest();
-    await t.mutation(api.example.upsertConnection, {
+    await t.mutation(api.example.putSecret, {
       workspace: "acme",
-      environment: "testing",
-      provider: "resend",
+      environment: "staging",
+      name: "RESEND_API_KEY",
       value: "re_test",
     });
 
-    const removed = await t.mutation(api.example.removeConnection, {
+    const removed = await t.mutation(api.example.removeSecret, {
       workspace: "acme",
-      environment: "testing",
-      provider: "resend",
+      environment: "staging",
+      name: "RESEND_API_KEY",
     });
     expect(removed.removed).toBe(true);
 
-    const connections = await t.query(api.example.listConnections, {
+    const secrets = await t.query(api.example.listSecrets, {
       workspace: "acme",
-      environment: "testing",
+      environment: "staging",
       paginationOpts: { numItems: 20, cursor: null },
     });
-    expect(connections.page).toHaveLength(0);
+    expect(secrets.page).toHaveLength(0);
   });
 
-  test("getUsagePreview returns only masked server-side output", async () => {
+  test("previewSecret returns only masked server-side output", async () => {
     const t = initConvexTest();
-    await t.mutation(api.example.upsertConnection, {
+    await t.mutation(api.example.putSecret, {
       workspace: "acme",
       environment: "production",
-      provider: "openai",
+      name: "OPENAI_API_KEY",
       value: "sk-live-secret-1234",
-      owner: "platform",
-      label: "Primary OpenAI key",
     });
 
-    const preview = await t.query(api.example.getUsagePreview, {
+    const preview = await t.query(api.example.previewSecret, {
       workspace: "acme",
       environment: "production",
-      provider: "openai",
+      name: "OPENAI_API_KEY",
     });
 
     expect(preview.resolution).toBe("active");
-    expect(preview.networkSafe).toBe(true);
-    expect(preview.maskedToken).toContain("••••");
-    expect(preview.maskedToken).not.toContain("sk-live-secret-1234");
-    expect(preview.authHeaderPreview).toMatch(/^Bearer /);
-    expect(preview.owner).toBe("platform");
-    expect(preview.label).toBe("Primary OpenAI key");
+    expect(preview.maskedValue).toContain("\u2022");
+    expect(preview.maskedValue).not.toContain("sk-live-secret-1234");
+  });
+
+  test("seedDemoData populates environment with sample secrets", async () => {
+    const t = initConvexTest();
+    const result = await t.mutation(api.example.seedDemoData, {
+      workspace: "acme",
+      environment: "development",
+    });
+
+    expect(result.seeded).toBe(6);
+
+    const secrets = await t.query(api.example.listSecrets, {
+      workspace: "acme",
+      environment: "development",
+      paginationOpts: { numItems: 20, cursor: null },
+    });
+    expect(secrets.page.length).toBe(6);
+
+    // Re-seeding should not create duplicates
+    const result2 = await t.mutation(api.example.seedDemoData, {
+      workspace: "acme",
+      environment: "development",
+    });
+    expect(result2.seeded).toBe(0);
   });
 });

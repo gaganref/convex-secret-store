@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 
-export type Page = "connections" | "usage" | "activity" | "maintenance";
-export type Environment = "production" | "testing";
+export type Page = "secrets" | "activity" | "settings";
+export type Environment = "development" | "staging" | "production";
 
 export type AppRoute = {
   page: Page;
@@ -10,30 +10,25 @@ export type AppRoute = {
 };
 
 export const DEFAULT_ROUTE: AppRoute = {
-  page: "connections",
+  page: "secrets",
   environment: "production",
-  workspace: "acme",
+  workspace: "",
 };
 
-export const ENVIRONMENT_OPTIONS: Array<{
-  label: string;
-  value: Environment;
-}> = [
+export const ENVIRONMENTS: Array<{ label: string; value: Environment }> = [
+  { label: "Development", value: "development" },
+  { label: "Staging", value: "staging" },
   { label: "Production", value: "production" },
-  { label: "Testing", value: "testing" },
 ];
 
 function isPage(value: string | null): value is Page {
-  return (
-    value === "connections" ||
-    value === "usage" ||
-    value === "activity" ||
-    value === "maintenance"
-  );
+  return value === "secrets" || value === "activity" || value === "settings";
 }
 
 function isEnvironment(value: string | null): value is Environment {
-  return value === "production" || value === "testing";
+  return (
+    value === "development" || value === "staging" || value === "production"
+  );
 }
 
 function readRoute(hash: string): AppRoute {
@@ -47,9 +42,7 @@ function readRoute(hash: string): AppRoute {
     : DEFAULT_ROUTE.environment;
   const workspaceParam = url.searchParams.get("workspace")?.trim();
   const workspace =
-    workspaceParam && workspaceParam.length > 0
-      ? workspaceParam
-      : DEFAULT_ROUTE.workspace;
+    workspaceParam && workspaceParam.length > 0 ? workspaceParam : "";
   return { page, environment, workspace };
 }
 
@@ -63,27 +56,17 @@ function buildHash(route: AppRoute) {
 
 export function useAppRoute() {
   const [route, setRoute] = useState<AppRoute>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_ROUTE;
-    }
+    if (typeof window === "undefined") return DEFAULT_ROUTE;
     return readRoute(window.location.hash);
   });
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    if (typeof window === "undefined") return;
 
     const syncRoute = () => {
       const nextRoute = readRoute(window.location.hash);
-      startTransition(() => {
-        setRoute(nextRoute);
-      });
+      startTransition(() => setRoute(nextRoute));
     };
-
-    if (window.location.hash.length === 0) {
-      window.history.replaceState(null, "", buildHash(DEFAULT_ROUTE));
-    }
 
     syncRoute();
     window.addEventListener("hashchange", syncRoute);
@@ -91,16 +74,11 @@ export function useAppRoute() {
   }, []);
 
   function updateRoute(patch: Partial<AppRoute>) {
-    if (typeof window === "undefined") {
-      return;
-    }
-
+    if (typeof window === "undefined") return;
     const nextRoute = { ...readRoute(window.location.hash), ...patch };
     const nextHash = buildHash(nextRoute);
     if (window.location.hash === nextHash) {
-      startTransition(() => {
-        setRoute(nextRoute);
-      });
+      startTransition(() => setRoute(nextRoute));
       return;
     }
     window.location.hash = nextHash;
@@ -110,12 +88,6 @@ export function useAppRoute() {
     route,
     setPage: (page: Page) => updateRoute({ page }),
     setEnvironment: (environment: Environment) => updateRoute({ environment }),
-    setWorkspace: (workspace: string) =>
-      updateRoute({
-        workspace:
-          workspace.trim().length > 0
-            ? workspace.trim()
-            : DEFAULT_ROUTE.workspace,
-      }),
+    setWorkspace: (workspace: string) => updateRoute({ workspace }),
   };
 }
