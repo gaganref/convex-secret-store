@@ -1,8 +1,6 @@
 import { lazy, Suspense } from "react";
-import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppLayout } from "@/layouts/AppLayout";
 import { useAppRoute } from "@/lib/navigation";
-import { LoginPage } from "@/pages/LoginPage";
 import { Spinner } from "@/components/ui/spinner";
 
 const ConnectionsPage = lazy(async () => {
@@ -32,34 +30,30 @@ function RouteFallback() {
 }
 
 function AppContent() {
-  const { username } = useAuth();
   const {
-    route: { page, environment },
+    route: { page, environment, workspace },
     setPage,
     setEnvironment,
+    setWorkspace,
   } = useAppRoute();
 
   let pageContent = (
-    <ConnectionsPage workspace={username ?? ""} environment={environment} />
+    <ConnectionsPage workspace={workspace} environment={environment} />
   );
 
   if (page === "activity") {
-    pageContent = <ActivityPage workspace={username ?? ""} environment={environment} />;
+    pageContent = <ActivityPage workspace={workspace} environment={environment} />;
   } else if (page === "maintenance") {
-    pageContent = (
-      <MaintenancePage workspace={username ?? ""} environment={environment} />
-    );
-  }
-
-  if (!username) {
-    return <LoginPage />;
+    pageContent = <MaintenancePage workspace={workspace} environment={environment} />;
   }
 
   return (
     <AppLayout
       page={page}
       environment={environment}
+      workspace={workspace}
       onEnvironmentChange={setEnvironment}
+      onWorkspaceChange={setWorkspace}
       onNavigate={setPage}
     >
       <Suspense fallback={<RouteFallback />}>{pageContent}</Suspense>
@@ -68,9 +62,5 @@ function AppContent() {
 }
 
 export default function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
+  return <AppContent />;
 }

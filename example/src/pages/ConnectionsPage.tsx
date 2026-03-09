@@ -30,7 +30,7 @@ import {
   PencilSimple,
   Trash,
 } from "@phosphor-icons/react";
-import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
+import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 
 type Provider =
@@ -207,12 +207,10 @@ export function ConnectionsPage({
           <h2 className="text-sm font-medium mt-1">
             Provider credentials for {workspace}
           </h2>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span>Scope:</span>
-          <Badge variant="outline">
-            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
-          </Badge>
+          <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
+            Start with the provider secret only. Ownership, notes, and expiry are
+            available under advanced details when you need them.
+          </p>
         </div>
       </div>
 
@@ -393,38 +391,52 @@ export function ConnectionsPage({
                 <Label htmlFor="value">Secret value</Label>
                 <Textarea name="value" id="value" rows={3} required placeholder="Paste the credential" />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="label">Label</Label>
-                <Input
-                  name="label"
-                  id="label"
-                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.label ?? "" : ""}
-                  placeholder="Primary production token"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="owner">Owner</Label>
-                <Input
-                  name="owner"
-                  id="owner"
-                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.owner ?? "" : ""}
-                  placeholder="platform"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  name="notes"
-                  id="notes"
-                  rows={2}
-                  defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
-                  placeholder="Optional context"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="ttlDays">Expire after days</Label>
-                <Input name="ttlDays" id="ttlDays" type="number" min="1" step="1" placeholder="Leave blank for no expiry" />
-              </div>
+              <details className="border border-border bg-muted/20 p-3">
+                <summary className="cursor-pointer text-xs font-medium">
+                  Advanced details
+                </summary>
+                <div className="mt-3 flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="label">Label</Label>
+                    <Input
+                      name="label"
+                      id="label"
+                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.label ?? "" : ""}
+                      placeholder="Primary production token"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="owner">Owner</Label>
+                    <Input
+                      name="owner"
+                      id="owner"
+                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.owner ?? "" : ""}
+                      placeholder="platform"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      name="notes"
+                      id="notes"
+                      rows={2}
+                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
+                      placeholder="Optional context"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="ttlDays">Expire after days</Label>
+                    <Input
+                      name="ttlDays"
+                      id="ttlDays"
+                      type="number"
+                      min="1"
+                      step="1"
+                      placeholder="Leave blank for no expiry"
+                    />
+                  </div>
+                </div>
+              </details>
             </fieldset>
             <DialogFooter>
               <div className="mr-auto flex flex-col gap-1">

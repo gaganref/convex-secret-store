@@ -20,7 +20,7 @@ import {
   EmptyDescription,
 } from "@/components/ui/empty";
 import { MagnifyingGlass } from "@phosphor-icons/react";
-import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
+import { type Environment } from "@/lib/navigation";
 
 const EVENT_FILTERS = ["all", "created", "updated", "rotated", "deleted"] as const;
 type EventFilter = (typeof EVENT_FILTERS)[number];
@@ -75,12 +75,10 @@ export function ActivityPage({
           <h2 className="text-sm font-medium mt-1">
             Audit trail for {workspace}
           </h2>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span>Scope:</span>
-          <Badge variant="outline">
-            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
-          </Badge>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Review created, updated, rotated, and deleted events for the selected
+            workspace scope.
+          </p>
         </div>
       </div>
 

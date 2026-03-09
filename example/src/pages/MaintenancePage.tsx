@@ -23,7 +23,7 @@ import {
   Broom,
   Plant,
 } from "@phosphor-icons/react";
-import { type Environment, ENVIRONMENT_OPTIONS } from "@/lib/navigation";
+import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 
 export function MaintenancePage({
@@ -109,17 +109,16 @@ export function MaintenancePage({
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-widest">
-            Maintenance
+            Advanced
           </p>
           <h2 className="text-sm font-medium mt-1">
-            Operate the store without touching plaintext
+            Rotation and cleanup without touching plaintext
           </h2>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span>Viewing snapshot:</span>
-          <Badge variant="outline">
-            {ENVIRONMENT_OPTIONS.find((option) => option.value === environment)?.label}
-          </Badge>
+          <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
+            These are secondary store operations. The selected workspace is used
+            for the snapshot and legacy seed flow; rotation and cleanup still run
+            across the store.
+          </p>
         </div>
       </div>
 

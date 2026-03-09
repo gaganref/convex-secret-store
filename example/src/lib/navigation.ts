@@ -6,11 +6,13 @@ export type Environment = "production" | "testing";
 export type AppRoute = {
   page: Page;
   environment: Environment;
+  workspace: string;
 };
 
 export const DEFAULT_ROUTE: AppRoute = {
   page: "connections",
   environment: "production",
+  workspace: "acme",
 };
 
 export const ENVIRONMENT_OPTIONS: Array<{
@@ -38,11 +40,19 @@ function readRoute(hash: string): AppRoute {
   const environment = isEnvironment(environmentParam)
     ? environmentParam
     : DEFAULT_ROUTE.environment;
-  return { page, environment };
+  const workspaceParam = url.searchParams.get("workspace")?.trim();
+  const workspace =
+    workspaceParam && workspaceParam.length > 0
+      ? workspaceParam
+      : DEFAULT_ROUTE.workspace;
+  return { page, environment, workspace };
 }
 
 function buildHash(route: AppRoute) {
-  const search = new URLSearchParams({ environment: route.environment });
+  const search = new URLSearchParams({
+    environment: route.environment,
+    workspace: route.workspace,
+  });
   return `#/${route.page}?${search.toString()}`;
 }
 
@@ -95,5 +105,10 @@ export function useAppRoute() {
     route,
     setPage: (page: Page) => updateRoute({ page }),
     setEnvironment: (environment: Environment) => updateRoute({ environment }),
+    setWorkspace: (workspace: string) =>
+      updateRoute({
+        workspace:
+          workspace.trim().length > 0 ? workspace.trim() : DEFAULT_ROUTE.workspace,
+      }),
   };
 }

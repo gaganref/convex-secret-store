@@ -1,32 +1,19 @@
 import {
-  Vault,
   ArrowsClockwise,
-  Wrench,
-  SignOut,
-  User,
   PlugsConnected,
+  Vault,
+  Wrench,
 } from "@phosphor-icons/react";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ThemeSwitcher } from "@/components/theme-switcher";
+import { cn } from "@/lib/utils";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  ENVIRONMENT_OPTIONS,
+  type Environment,
+  type Page,
+} from "@/lib/navigation";
 import {
   Select,
   SelectContent,
@@ -34,158 +21,158 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { useAuth } from "@/context/AuthContext";
-import {
-  ENVIRONMENT_OPTIONS,
-  type Environment,
-  type Page,
-} from "@/lib/navigation";
-import type { ReactNode } from "react";
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof Vault }[] = [
   { id: "connections", label: "Connections", icon: PlugsConnected },
   { id: "activity", label: "Activity", icon: ArrowsClockwise },
-  { id: "maintenance", label: "Maintenance", icon: Wrench },
+  { id: "maintenance", label: "Advanced", icon: Wrench },
 ];
+
+const WORKSPACE_OPTIONS = ["acme", "northwind", "lattice"];
 
 type AppLayoutProps = {
   page: Page;
   environment: Environment;
+  workspace: string;
   onNavigate: (page: Page) => void;
   onEnvironmentChange: (environment: Environment) => void;
+  onWorkspaceChange: (workspace: string) => void;
   children: ReactNode;
 };
 
 export function AppLayout({
   page,
   environment,
+  workspace,
   onNavigate,
   onEnvironmentChange,
+  onWorkspaceChange,
   children,
 }: AppLayoutProps) {
-  const { username, logout } = useAuth();
-  const currentNav = NAV_ITEMS.find((n) => n.id === page);
-  const CurrentIcon = currentNav?.icon;
-
   return (
-    <SidebarProvider>
+    <div className="min-h-svh bg-background">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:border focus:bg-background focus:px-3 focus:py-2 focus:text-xs"
       >
         Skip to content
       </a>
-      <Sidebar>
-        <SidebarHeader className="px-4 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="flex size-8 items-center justify-center bg-primary text-primary-foreground text-sm font-bold select-none shrink-0 shadow-md shadow-primary/25"
-              aria-hidden="true"
-            >
-              <Vault size={16} weight="fill" />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-bold tracking-widest uppercase leading-none">
-                Secret
-              </span>
-              <span className="text-[9px] text-muted-foreground tracking-widest uppercase leading-none mt-1">
-                Vault
-              </span>
-            </div>
-          </div>
-        </SidebarHeader>
 
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = page === item.id;
-                  return (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        aria-current={isActive ? "page" : undefined}
-                        onClick={() => onNavigate(item.id)}
-                        className="cursor-pointer"
-                      >
-                        <Icon weight={isActive ? "fill" : "regular"} />
-                        <span>{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-
-        <SidebarFooter className="px-3 py-3 gap-2">
-          <Separator />
-          <div className="flex items-center gap-2 px-1 py-1">
-            <div className="flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground shrink-0">
-              <User size={12} />
-            </div>
-            <span className="flex-1 text-xs text-muted-foreground truncate">
-              {username}
-            </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 shrink-0"
-                    onClick={logout}
-                    aria-label="Sign out"
-                  />
-                }
+      <header className="border-b">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 md:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex size-9 items-center justify-center bg-primary text-primary-foreground shadow-md shadow-primary/25"
+                aria-hidden="true"
               >
-                <SignOut size={12} />
-              </TooltipTrigger>
-              <TooltipContent side="right">Sign out</TooltipContent>
-            </Tooltip>
-          </div>
-          <div className="px-1">
-            <ThemeSwitcher />
-          </div>
-        </SidebarFooter>
-      </Sidebar>
+                <Vault size={18} weight="fill" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold tracking-[0.28em] uppercase leading-none">
+                  Secret Vault
+                </span>
+                <span className="mt-1 text-xs text-muted-foreground">
+                  Reference app for scoped provider credentials
+                </span>
+              </div>
+            </div>
 
-      <SidebarInset>
-        <header className="flex h-12 items-center gap-3 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          {CurrentIcon && (
-            <CurrentIcon size={14} className="text-muted-foreground shrink-0" />
-          )}
-          <span className="text-sm font-medium">{currentNav?.label}</span>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="hidden text-[10px] uppercase tracking-widest text-muted-foreground sm:inline">
-              Scope
-            </span>
-            <Select
-              value={environment}
-              onValueChange={(value) => onEnvironmentChange(value as Environment)}
-            >
-              <SelectTrigger size="sm" className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ENVIRONMENT_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="uppercase tracking-widest">Workspace</span>
+                <Select
+                  value={workspace}
+                  onValueChange={(value) => {
+                    if (value) {
+                      onWorkspaceChange(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WORKSPACE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="uppercase tracking-widest">Environment</span>
+                <Select
+                  value={environment}
+                  onValueChange={(value) =>
+                    onEnvironmentChange(value as Environment)
+                  }
+                >
+                  <SelectTrigger size="sm" className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ENVIRONMENT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+
+              <ThemeSwitcher />
+            </div>
           </div>
-        </header>
-        <main id="main-content" className="flex-1 overflow-auto p-4 md:p-6">
-          <div className="mx-auto w-full lg:w-[90%] xl:w-[85%]">{children}</div>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+
+          <div className="flex flex-col gap-3 border-t pt-4 md:flex-row md:items-center md:justify-between">
+            <nav className="flex flex-wrap gap-2" aria-label="Sections">
+              {NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = page === item.id;
+                return (
+                  <Button
+                    key={item.id}
+                    variant={isActive ? "default" : "ghost"}
+                    size="sm"
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={() => onNavigate(item.id)}
+                    className={cn(
+                      "justify-start px-3",
+                      !isActive && "text-muted-foreground",
+                    )}
+                  >
+                    <Icon
+                      size={13}
+                      data-icon="inline-start"
+                      weight={isActive ? "fill" : "regular"}
+                    />
+                    {item.label}
+                  </Button>
+                );
+              })}
+            </nav>
+
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline">{workspace}</Badge>
+              <span>/</span>
+              <Badge variant="outline">
+                {
+                  ENVIRONMENT_OPTIONS.find(
+                    (option) => option.value === environment,
+                  )?.label
+                }
+              </Badge>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main id="main-content" className="px-4 py-6 md:px-6">
+        <div className="mx-auto w-full max-w-7xl px-4 md:px-6">{children}</div>
+      </main>
+    </div>
   );
 }
