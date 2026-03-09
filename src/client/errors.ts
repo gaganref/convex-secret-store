@@ -1,6 +1,5 @@
 export type SecretStoreClientErrorCode =
   | "INVALID_OPTIONS"
-  | "VALUE_TOO_LARGE"
   | "INVALID_ARGUMENT"
   | "KEY_VERSION_UNAVAILABLE"
   | "RUNTIME_UNAVAILABLE"
@@ -32,13 +31,6 @@ export function optionsError(message: string) {
   return new SecretStoreClientError(
     "INVALID_OPTIONS",
     `secret-store options: ${message}`,
-  );
-}
-
-export function valueTooLargeError(limitBytes: number, actualBytes: number) {
-  return new SecretStoreClientError(
-    "VALUE_TOO_LARGE",
-    `secret-store value exceeds ${limitBytes} bytes (received ${actualBytes})`,
   );
 }
 

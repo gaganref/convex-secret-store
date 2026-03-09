@@ -154,6 +154,20 @@ describe("component lib", () => {
     ).rejects.toThrow();
   });
 
+  test("component rejects non-integer key versions", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.mutation(api.lib.put, {
+        name: "openai",
+        encryptedValue: "ciphertext",
+        iv: "iv",
+        wrappedDEK: "wrapped",
+        dekIv: "dekIv",
+        keyVersion: 1.5,
+      }),
+    ).rejects.toThrow();
+  });
+
   test("cleanup only removes expired secrets and leaves perpetual secrets intact", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, {
@@ -194,6 +208,41 @@ describe("component lib", () => {
       paginationOpts: { numItems: 20, cursor: null },
     });
     expect(events.page.some((event) => event.name === "expired")).toBe(true);
+  });
+
+  test("cleanup splits one batch budget across secrets and events", async () => {
+    const t = initConvexTest();
+    const now = Date.now();
+
+    await t.mutation(api.lib.put, {
+      name: "a",
+      encryptedValue: "ciphertext-a",
+      iv: "iv-a",
+      wrappedDEK: "wrapped-a",
+      dekIv: "dekIv-a",
+      keyVersion: 1,
+      expiresAt: now - 1,
+    });
+    await t.mutation(api.lib.put, {
+      name: "b",
+      encryptedValue: "ciphertext-b",
+      iv: "iv-b",
+      wrappedDEK: "wrapped-b",
+      dekIv: "dekIv-b",
+      keyVersion: 1,
+      expiresAt: now - 1,
+    });
+
+    const first = await t.mutation(api.lib.cleanup, {
+      retentionMs: 1,
+      batchSize: 1,
+    });
+
+    expect(first).toEqual({
+      deletedSecrets: 1,
+      deletedEvents: 0,
+      isDone: false,
+    });
   });
 
   test("updateWrappedDEK returns stale when the row changed after it was read", async () => {

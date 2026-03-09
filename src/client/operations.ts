@@ -9,7 +9,6 @@ import {
   invalidArgumentError,
   keyVersionUnavailableError,
   operationFailedError,
-  valueTooLargeError,
 } from "./errors.js";
 import {
   assertNullableNonNegativeInteger,
@@ -40,11 +39,9 @@ import type {
   SecretStoreTypeOptions,
 } from "./types.js";
 
-const MAX_VALUE_BYTES = 64 * 1024;
 const DEFAULT_ROTATION_BATCH_SIZE = 100;
 const DEFAULT_CLEANUP_BATCH_SIZE = 100;
 const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const textEncoder = new TextEncoder();
 
 function readNamespace(args: object): string | undefined {
   if (!("namespace" in args)) {
@@ -150,10 +147,6 @@ export class SecretStore<
   async put(ctx: RunMutationCtx, args: PutArgs<TOptions>): Promise<PutResult> {
     const now = Date.now();
     const namespace = readNamespace(args);
-    const valueBytes = textEncoder.encode(args.value);
-    if (valueBytes.byteLength > MAX_VALUE_BYTES) {
-      throw valueTooLargeError(MAX_VALUE_BYTES, valueBytes.byteLength);
-    }
 
     try {
       const expiresAt = resolvePutExpiresAt(

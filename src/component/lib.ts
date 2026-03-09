@@ -83,6 +83,15 @@ function assertNullableNonNegativeInteger(
   }
 }
 
+function assertNonNegativeInteger(value: number, field: string) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new ConvexError({
+      code: "invalid_argument",
+      message: `${field} must be a non-negative integer`,
+    });
+  }
+}
+
 function assertValidNamespace(namespace: string | undefined) {
   if (namespace === "") {
     throw new ConvexError({
@@ -236,6 +245,7 @@ export const put = mutation({
   },
   returns: putResultValidator,
   handler: async (ctx, args) => {
+    assertNonNegativeInteger(args.keyVersion, "keyVersion");
     assertNullableNonNegativeInteger(args.expiresAt, "expiresAt");
     const existing = await getSecretByName(ctx, args.namespace, args.name);
     const now = Date.now();
@@ -586,6 +596,7 @@ export const listByKeyVersion = query({
   },
   returns: listByKeyVersionResultValidator,
   handler: async (ctx, args) => {
+    assertNonNegativeInteger(args.fromVersion, "fromVersion");
     const result = await paginator(ctx.db, schema)
       .query("secrets")
       .withIndex("by_key_version", (q) => q.eq("keyVersion", args.fromVersion))
@@ -619,6 +630,8 @@ export const updateWrappedDEK = mutation({
   },
   returns: updateWrappedDEKResultValidator,
   handler: async (ctx, args) => {
+    assertNonNegativeInteger(args.expectedKeyVersion, "expectedKeyVersion");
+    assertNonNegativeInteger(args.keyVersion, "keyVersion");
     const secret = await ctx.db.get(args.secretId);
     if (secret === null) {
       return { ok: false as const, reason: "not_found" as const };
@@ -672,12 +685,14 @@ export const cleanup = mutation({
     }
 
     const now = Date.now();
+    const secretBudget = Math.ceil(args.batchSize / 2);
+    const eventBudget = Math.floor(args.batchSize / 2);
     const expiredSecrets = await ctx.db
       .query("secrets")
       .withIndex("by_expires_at", (q) =>
         q.gte("expiresAt", 0).lt("expiresAt", now),
       )
-      .take(args.batchSize);
+      .take(secretBudget);
 
     for (const secret of expiredSecrets) {
       await recordEvent(ctx, {
@@ -694,7 +709,7 @@ export const cleanup = mutation({
     const oldEvents = await ctx.db
       .query("secretEvents")
       .withIndex("by_created_at", (q) => q.lt("createdAt", cutoff))
-      .take(args.batchSize);
+      .take(eventBudget);
     for (const event of oldEvents) {
       await ctx.db.delete(event._id);
     }
@@ -703,8 +718,7 @@ export const cleanup = mutation({
       deletedSecrets: expiredSecrets.length,
       deletedEvents: oldEvents.length,
       isDone:
-        expiredSecrets.length < args.batchSize &&
-        oldEvents.length < args.batchSize,
+        expiredSecrets.length < secretBudget && oldEvents.length < eventBudget,
     };
   },
 });
