@@ -5,9 +5,6 @@ import { formatAbsoluteTime, formatCountLabel, formatRelativeTime } from "@/lib/
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardAction,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,20 +51,38 @@ export function ActivityPage({
   }, [activity, deferredSearch, typeFilter]);
 
   const latestEvent = filtered[0];
+  const visibleLabel = activity
+    ? `${formatCountLabel(filtered.length, "visible event")}`
+    : "Loading events";
 
   function badgeVariant(type: string) {
     switch (type) {
-      case "created": return "default" as const;
-      case "rotated": return "secondary" as const;
-      case "deleted": return "destructive" as const;
-      default: return "outline" as const;
+      case "created":
+        return "default" as const;
+      case "rotated":
+        return "secondary" as const;
+      case "deleted":
+        return "destructive" as const;
+      default:
+        return "outline" as const;
     }
+  }
+
+  function describeEvent(event: (typeof filtered)[number]) {
+    if (event.metadata?.deletedReason) {
+      return `Deleted via ${String(event.metadata.deletedReason).replace(/_/g, " ")}.`;
+    }
+    if (event.metadata?.previousKeyVersion) {
+      return `Moved from version ${event.metadata.previousKeyVersion} to ${event.metadata.newKeyVersion}.`;
+    }
+    if (event.type === "created") return "Secret added to this scope.";
+    if (event.type === "updated") return "Secret or details changed.";
+    return `Occurred ${formatRelativeTime(event.createdAt)}.`;
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col gap-2">
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-widest">
             Activity
@@ -76,36 +91,22 @@ export function ActivityPage({
             Audit trail for {workspace}
           </h2>
           <p className="mt-2 text-xs text-muted-foreground">
-            Review created, updated, rotated, and deleted events for the selected
-            workspace scope.
+            Every write path appends audit records here, including cleanup-driven
+            deletions and key rotation batches for the selected scope.
           </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline">{visibleLabel}</Badge>
+          <Badge variant="outline">{typeFilter === "all" ? "All types" : typeFilter}</Badge>
+          <Badge variant="outline">
+            {latestEvent ? `Latest ${formatRelativeTime(latestEvent.createdAt)}` : "No activity yet"}
+          </Badge>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card size="sm">
-          <CardContent>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Visible events</p>
-            <p className="text-lg font-medium tabular-nums mt-1">{filtered.length}</p>
-            <p className="text-xs text-muted-foreground">{formatCountLabel(filtered.length, "event")}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm">
-          <CardContent>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Latest</p>
-            <p className="text-lg font-medium mt-1">{latestEvent ? latestEvent.type : "—"}</p>
-            <p className="text-xs text-muted-foreground">
-              {latestEvent ? formatRelativeTime(latestEvent.createdAt) : "No activity"}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Toolbar */}
       <Card size="sm">
         <CardContent>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <div className="relative flex-1 min-w-48">
               <MagnifyingGlass size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -115,12 +116,12 @@ export function ActivityPage({
                 className="pl-7"
               />
             </div>
-            <div className="flex border border-border p-0.5">
+            <div className="flex flex-wrap gap-1">
               {EVENT_FILTERS.map((value) => (
                 <Button
                   key={value}
                   size="xs"
-                  variant={typeFilter === value ? "default" : "ghost"}
+                  variant={typeFilter === value ? "default" : "outline"}
                   onClick={() => setTypeFilter(value)}
                   className="capitalize"
                 >
@@ -147,47 +148,51 @@ export function ActivityPage({
           <EmptyHeader>
             <EmptyTitle>No matching events</EmptyTitle>
             <EmptyDescription>
-              Broaden the filter or create a connection to see the audit trail.
+              Broaden the filter or create a connection to start the audit trail for
+              this scope.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="overflow-hidden border border-border bg-card">
           {filtered.map((event) => (
-            <Card key={event.eventId} size="sm">
-              <CardHeader>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    {formatAbsoluteTime(event.createdAt)}
-                  </p>
-                  <CardTitle className="mt-0.5">{event.name}</CardTitle>
-                </div>
-                <CardAction>
+            <div
+              key={event.eventId}
+              className="grid gap-3 border-t border-border px-4 py-3 first:border-t-0 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-start"
+            >
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                  {formatAbsoluteTime(event.createdAt)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatRelativeTime(event.createdAt)}
+                </p>
+              </div>
+
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{event.name}</p>
                   <Badge variant={badgeVariant(event.type)}>
                     {event.type}
                   </Badge>
-                </CardAction>
-              </CardHeader>
-              <CardContent>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  {event.metadata?.deletedReason
-                    ? `Deleted via ${String(event.metadata.deletedReason).replace(/_/g, " ")}`
-                    : event.metadata?.previousKeyVersion
-                      ? `Moved from version ${event.metadata.previousKeyVersion} to ${event.metadata.newKeyVersion}.`
-                      : `Occurred ${formatRelativeTime(event.createdAt)}.`}
+                  {describeEvent(event)}
                 </p>
                 {Object.keys(event.metadata ?? {}).length > 0 && (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 pt-3 border-t">
+                  <div className="flex flex-wrap gap-2">
                     {Object.entries(event.metadata ?? {}).map(([key, value]) => (
-                      <div key={key}>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{key}</p>
-                        <p className="text-xs mt-0.5">{String(value)}</p>
-                      </div>
+                      <Badge key={key} variant="outline">
+                        {key}: {String(value)}
+                      </Badge>
                     ))}
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+              <div className="justify-self-start md:justify-self-end">
+                <Badge variant="outline">{environment}</Badge>
+              </div>
+            </div>
           ))}
         </div>
       )}

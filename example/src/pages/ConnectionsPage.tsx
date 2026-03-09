@@ -32,6 +32,7 @@ import {
 } from "@phosphor-icons/react";
 import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
+import { SecurityExplainer } from "@/components/security-explainer";
 
 type Provider =
   | "openai"
@@ -209,8 +210,9 @@ export function ConnectionsPage({
             Provider credentials for {workspace}
           </h2>
           <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-            Start with the provider secret only. Ownership, notes, and expiry are
-            available under advanced details when you need them.
+            Start with the provider secret only. Owner, notes, and expiry are
+            optional, and those fields stay plaintext so they should remain low
+            sensitivity.
           </p>
         </div>
       </div>
@@ -231,6 +233,8 @@ export function ConnectionsPage({
           {environment === "production" ? "Production scope" : "Testing scope"}
         </Badge>
       </div>
+
+      <SecurityExplainer mode="storage" />
 
       {/* Provider grid */}
       {connections === undefined ? (
@@ -328,7 +332,8 @@ export function ConnectionsPage({
                   ) : (
                     <div className="border-t pt-3">
                       <p className="text-xs text-muted-foreground">
-                        No secret configured for this provider in the current scope.
+                        No secret stored for this provider in the current workspace
+                        and environment.
                       </p>
                     </div>
                   )}
@@ -395,7 +400,8 @@ export function ConnectionsPage({
                 : ""}
             </DialogTitle>
             <DialogDescription>
-              Secret values are never shown after save.
+              Secret values are encrypted and never shown again after save. Advanced
+              details remain plaintext metadata.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -412,7 +418,7 @@ export function ConnectionsPage({
               </div>
               <details className="border border-border bg-muted/20 p-3">
                 <summary className="cursor-pointer text-xs font-medium">
-                  Advanced details
+                  Advanced details (plaintext metadata)
                 </summary>
                 <div className="mt-3 flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
@@ -440,7 +446,7 @@ export function ConnectionsPage({
                       id="notes"
                       rows={2}
                       defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
-                      placeholder="Optional context"
+                      placeholder="Optional plaintext context"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -494,7 +500,8 @@ export function ConnectionsPage({
               {editTarget ? `Edit ${editTarget.name} details` : ""}
             </DialogTitle>
             <DialogDescription>
-              Only metadata and expiry are changed. The encrypted value stays untouched.
+              This only changes plaintext metadata and expiry. The encrypted secret
+              value stays untouched.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -564,7 +571,8 @@ export function ConnectionsPage({
           <DialogHeader>
             <DialogTitle>Remove {deleteTarget}</DialogTitle>
             <DialogDescription>
-              This permanently deletes the stored secret and records a deleted event.
+              This removes the stored secret for this scope and writes a matching
+              deleted audit event.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

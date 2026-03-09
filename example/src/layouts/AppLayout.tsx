@@ -24,6 +24,7 @@ import {
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof Vault }[] = [
   { id: "connections", label: "Connections", icon: PlugsConnected },
+  { id: "usage", label: "Usage", icon: Vault },
   { id: "activity", label: "Activity", icon: ArrowsClockwise },
   { id: "maintenance", label: "Advanced", icon: Wrench },
 ];

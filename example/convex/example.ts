@@ -64,6 +64,13 @@ function toNamespace(
   return `${trimmed}:${environment}` as Namespace;
 }
 
+function maskSecret(value: string) {
+  if (value.length <= 8) {
+    return "•".repeat(value.length);
+  }
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`;
+}
+
 async function listAllConnections(
   ctx: Parameters<typeof secrets.list>[0],
   namespace: Namespace,
@@ -186,6 +193,72 @@ export const listActivity = query({
       namespace: toNamespace(args.workspace, args.environment),
       paginationOpts: args.paginationOpts,
     });
+  },
+});
+
+export const getUsagePreview = query({
+  args: {
+    workspace: v.string(),
+    environment: environmentValidator,
+    provider: providerValidator,
+  },
+  returns: v.object({
+    provider: providerValidator,
+    resolution: v.union(
+      v.literal("active"),
+      v.literal("expired"),
+      v.literal("missing"),
+    ),
+    networkSafe: v.boolean(),
+    serverNote: v.string(),
+    maskedToken: v.optional(v.string()),
+    authHeaderPreview: v.optional(v.string()),
+    updatedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+    owner: v.optional(v.string()),
+    label: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const loaded = await secrets.get(ctx, {
+      namespace: toNamespace(args.workspace, args.environment),
+      name: args.provider,
+    });
+
+    if (!loaded.ok) {
+      return {
+        provider: args.provider,
+        resolution:
+          loaded.reason === "expired"
+            ? ("expired" as const)
+            : ("missing" as const),
+        networkSafe: true,
+        serverNote:
+          loaded.reason === "expired"
+            ? "The secret exists, but the server would refuse to use it because it is expired."
+            : "No secret is configured for this provider in the selected scope.",
+      };
+    }
+
+    const maskedToken = maskSecret(loaded.value);
+    return {
+      provider: args.provider,
+      resolution: "active" as const,
+      networkSafe: true,
+      serverNote:
+        "The secret was loaded on the server and reduced to masked output before any data returned to the browser.",
+      maskedToken,
+      authHeaderPreview: `Bearer ${maskedToken}`,
+      updatedAt: loaded.updatedAt,
+      expiresAt: loaded.expiresAt,
+      owner:
+        typeof loaded.metadata?.owner === "string"
+          ? loaded.metadata.owner
+          : undefined,
+      label:
+        typeof loaded.metadata?.label === "string"
+          ? loaded.metadata.label
+          : undefined,
+    };
   },
 });
 

@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useState } from "react";
 
-export type Page = "connections" | "activity" | "maintenance";
+export type Page = "connections" | "usage" | "activity" | "maintenance";
 export type Environment = "production" | "testing";
 
 export type AppRoute = {
@@ -24,7 +24,12 @@ export const ENVIRONMENT_OPTIONS: Array<{
 ];
 
 function isPage(value: string | null): value is Page {
-  return value === "connections" || value === "activity" || value === "maintenance";
+  return (
+    value === "connections" ||
+    value === "usage" ||
+    value === "activity" ||
+    value === "maintenance"
+  );
 }
 
 function isEnvironment(value: string | null): value is Environment {

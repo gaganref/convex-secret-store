@@ -8,6 +8,11 @@ const ConnectionsPage = lazy(async () => {
   return { default: module.ConnectionsPage };
 });
 
+const UsagePage = lazy(async () => {
+  const module = await import("@/pages/UsagePage");
+  return { default: module.UsagePage };
+});
+
 const ActivityPage = lazy(async () => {
   const module = await import("@/pages/ActivityPage");
   return { default: module.ActivityPage };
@@ -41,7 +46,9 @@ function AppContent() {
     <ConnectionsPage workspace={workspace} environment={environment} />
   );
 
-  if (page === "activity") {
+  if (page === "usage") {
+    pageContent = <UsagePage workspace={workspace} environment={environment} />;
+  } else if (page === "activity") {
     pageContent = <ActivityPage workspace={workspace} environment={environment} />;
   } else if (page === "maintenance") {
     pageContent = <MaintenancePage workspace={workspace} environment={environment} />;

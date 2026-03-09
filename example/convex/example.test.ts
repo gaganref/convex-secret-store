@@ -130,4 +130,30 @@ describe("example", () => {
     });
     expect(connections.page).toHaveLength(0);
   });
+
+  test("getUsagePreview returns only masked server-side output", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.upsertConnection, {
+      workspace: "acme",
+      environment: "production",
+      provider: "openai",
+      value: "sk-live-secret-1234",
+      owner: "platform",
+      label: "Primary OpenAI key",
+    });
+
+    const preview = await t.query(api.example.getUsagePreview, {
+      workspace: "acme",
+      environment: "production",
+      provider: "openai",
+    });
+
+    expect(preview.resolution).toBe("active");
+    expect(preview.networkSafe).toBe(true);
+    expect(preview.maskedToken).toContain("••••");
+    expect(preview.maskedToken).not.toContain("sk-live-secret-1234");
+    expect(preview.authHeaderPreview).toMatch(/^Bearer /);
+    expect(preview.owner).toBe("platform");
+    expect(preview.label).toBe("Primary OpenAI key");
+  });
 });
