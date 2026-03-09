@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { paginator } from "convex-helpers/server/pagination";
 import { mutation, query } from "./_generated/server.js";
-import type { MutationCtx } from "./_generated/server.js";
+import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 import type { Doc, Id } from "./_generated/dataModel.js";
 import schema from "./schema.js";
 import {
@@ -93,17 +93,25 @@ function assertValidNamespace(namespace: string | undefined) {
 }
 
 async function getSecretByName(
-  ctx: { db: any },
+  ctx: Pick<QueryCtx | MutationCtx, "db">,
   namespace: string | undefined,
   name: string,
 ) {
   assertValidNamespace(namespace);
   return await ctx.db
     .query("secrets")
-    .withIndex("by_namespace_and_name", (q: any) =>
+    .withIndex("by_namespace_and_name", (q) =>
       q.eq("namespace", namespace).eq("name", name),
     )
     .unique();
+}
+
+function withOptionalField<T extends object, K extends string, V>(
+  object: T,
+  key: K,
+  value: V | undefined,
+): T & Partial<Record<K, V>> {
+  return value === undefined ? object : { ...object, [key]: value };
 }
 
 const failureReasonValidator = v.union(
@@ -273,29 +281,42 @@ export const put = mutation({
     const {
       _id: _existingId,
       _creationTime: _existingCreatedAt,
+      metadata: storedMetadata,
+      expiresAt: storedExpiresAt,
       ...stored
     } = existing;
-    const replacement: SecretReplacement = {
-      ...stored,
-      namespace: args.namespace,
-      name: args.name,
-      encryptedValue: args.encryptedValue,
-      iv: args.iv,
-      wrappedDEK: args.wrappedDEK,
-      dekIv: args.dekIv,
-      keyVersion: args.keyVersion,
-      updatedAt: now,
-    };
-    if (args.metadata === null) {
-      delete replacement.metadata;
-    } else if (args.metadata !== undefined) {
-      replacement.metadata = args.metadata;
-    }
-    if (args.expiresAt === null) {
-      delete replacement.expiresAt;
-    } else if (args.expiresAt !== undefined) {
-      replacement.expiresAt = args.expiresAt;
-    }
+    const nextMetadata =
+      args.metadata === undefined
+        ? storedMetadata
+        : args.metadata === null
+          ? undefined
+          : args.metadata;
+    const nextExpiresAt =
+      args.expiresAt === undefined
+        ? storedExpiresAt
+        : args.expiresAt === null
+          ? undefined
+          : args.expiresAt;
+
+    const replacement: SecretReplacement = withOptionalField(
+      withOptionalField(
+        {
+          ...stored,
+          namespace: args.namespace,
+          name: args.name,
+          encryptedValue: args.encryptedValue,
+          iv: args.iv,
+          wrappedDEK: args.wrappedDEK,
+          dekIv: args.dekIv,
+          keyVersion: args.keyVersion,
+          updatedAt: now,
+        },
+        "metadata",
+        nextMetadata,
+      ),
+      "expiresAt",
+      nextExpiresAt,
+    );
 
     await ctx.db.replace(existing._id, replacement);
     await recordEvent(ctx, {
@@ -313,7 +334,7 @@ export const put = mutation({
       createdAt: existing._creationTime,
       updatedAt: now,
       ...(replacement.expiresAt !== undefined
-        ? { expiresAt: replacement.expiresAt as number }
+        ? { expiresAt: replacement.expiresAt }
         : {}),
       isNew: false,
     };
@@ -409,22 +430,35 @@ export const update = mutation({
     const {
       _id: _secretId,
       _creationTime: _secretCreatedAt,
+      metadata: storedMetadata,
+      expiresAt: storedExpiresAt,
       ...stored
     } = secret;
-    const replacement: SecretReplacement = {
-      ...stored,
-      updatedAt: Date.now(),
-    };
-    if (args.metadata === null) {
-      delete replacement.metadata;
-    } else if (args.metadata !== undefined) {
-      replacement.metadata = args.metadata;
-    }
-    if (args.expiresAt === null) {
-      delete replacement.expiresAt;
-    } else if (args.expiresAt !== undefined) {
-      replacement.expiresAt = args.expiresAt;
-    }
+    const nextMetadata =
+      args.metadata === undefined
+        ? storedMetadata
+        : args.metadata === null
+          ? undefined
+          : args.metadata;
+    const nextExpiresAt =
+      args.expiresAt === undefined
+        ? storedExpiresAt
+        : args.expiresAt === null
+          ? undefined
+          : args.expiresAt;
+    const updatedAt = Date.now();
+    const replacement: SecretReplacement = withOptionalField(
+      withOptionalField(
+        {
+          ...stored,
+          updatedAt,
+        },
+        "metadata",
+        nextMetadata,
+      ),
+      "expiresAt",
+      nextExpiresAt,
+    );
     await ctx.db.replace(secret._id, replacement);
     await recordEvent(ctx, {
       secretId: secret._id,
@@ -438,9 +472,9 @@ export const update = mutation({
     });
     return {
       updated: true,
-      updatedAt: replacement.updatedAt as number,
+      updatedAt,
       ...(replacement.expiresAt !== undefined
-        ? { expiresAt: replacement.expiresAt as number }
+        ? { expiresAt: replacement.expiresAt }
         : {}),
     };
   },

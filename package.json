@@ -10,7 +10,12 @@
   "license": "Apache-2.0",
   "keywords": [
     "convex",
-    "component"
+    "component",
+    "secret",
+    "encryption",
+    "vault",
+    "key-rotation",
+    "audit-log"
   ],
   "type": "module",
   "scripts": {
@@ -37,17 +42,13 @@
   },
   "files": [
     "dist",
-    "src/test.ts"
+    "src"
   ],
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "types": "./dist/client/index.d.ts",
       "default": "./dist/client/index.js"
-    },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "default": "./dist/react/index.js"
     },
     "./test": "./src/test.ts",
     "./_generated/component.js": {
@@ -66,8 +67,7 @@
     }
   },
   "peerDependencies": {
-    "convex": "^1.31.7",
-    "react": "^18.3.1 || ^19.0.0"
+    "convex": "^1.31.7"
   },
   "devDependencies": {
     "@base-ui/react": "^1.2.0",

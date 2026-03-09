@@ -1,4 +1,5 @@
 import { optionsError } from "./errors.js";
+import { decodeBase64 } from "./base64.js";
 import type { SecretStoreTypeOptions } from "./types.js";
 
 export type SecretStoreOptions<
@@ -29,26 +30,13 @@ function decodeBase64Key(value: string): Uint8Array {
     throw optionsError("keys[].value must not be empty");
   }
 
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4 || 4)) % 4),
-    "=",
-  );
-
   try {
-    if (typeof atob === "function") {
-      const decoded = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-      return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
-    }
-    if (typeof Buffer !== "undefined") {
-      return Uint8Array.from(Buffer.from(padded, "base64"));
-    }
+    return decodeBase64(normalized);
   } catch (error) {
     throw optionsError(
       `keys[].value must be valid base64-encoded key material: ${String(error)}`,
     );
   }
-
-  throw optionsError("unable to decode base64 key material in this runtime");
 }
 
 function normalizeLogLevel(
