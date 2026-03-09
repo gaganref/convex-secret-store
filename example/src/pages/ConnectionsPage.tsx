@@ -122,6 +122,7 @@ export function ConnectionsPage({
   const expiredCount =
     connections?.page.filter((row) => row.effectiveState === "expired").length ?? 0;
   const isSubmitting = submitState !== null;
+  const missingCount = PROVIDERS.length - configuredCount;
 
   async function handleCreate(formData: FormData) {
     if (composeProvider === null) return;
@@ -214,29 +215,21 @@ export function ConnectionsPage({
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card size="sm">
-          <CardContent>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Configured</p>
-            <p className="text-lg font-medium tabular-nums mt-1">{configuredCount}</p>
-            <p className="text-xs text-muted-foreground">{formatCountLabel(configuredCount, "provider")}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm">
-          <CardContent>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Expired</p>
-            <p className="text-lg font-medium tabular-nums mt-1">{expiredCount}</p>
-            <p className="text-xs text-muted-foreground">{expiredCount > 0 ? "Needs refresh" : "All clear"}</p>
-          </CardContent>
-        </Card>
-        <Card size="sm">
-          <CardContent>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Env</p>
-            <p className="text-lg font-medium mt-1">{environment === "production" ? "Prod" : "Test"}</p>
-            <p className="text-xs text-muted-foreground">Active scope</p>
-          </CardContent>
-        </Card>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant="outline">
+          {formatCountLabel(configuredCount, "configured provider")}
+        </Badge>
+        <Badge variant={expiredCount > 0 ? "destructive" : "outline"}>
+          {expiredCount > 0
+            ? formatCountLabel(expiredCount, "expired provider")
+            : "No expired providers"}
+        </Badge>
+        <Badge variant="outline">
+          {formatCountLabel(missingCount, "missing provider")}
+        </Badge>
+        <Badge variant="outline">
+          {environment === "production" ? "Production scope" : "Testing scope"}
+        </Badge>
       </div>
 
       {/* Provider grid */}
@@ -250,13 +243,13 @@ export function ConnectionsPage({
           <span className="text-xs">Loading connections</span>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {PROVIDERS.map((provider) => {
             const row = byName.get(provider.name);
             const isConfigured = row !== undefined;
             const isExpired = row?.effectiveState === "expired";
             return (
-              <Card key={provider.name}>
+              <Card key={provider.name} className="gap-0">
                 <CardHeader>
                   <div>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
@@ -283,39 +276,65 @@ export function ConnectionsPage({
                   </CardAction>
                 </CardHeader>
 
-                <CardContent>
+                <CardContent className="space-y-3">
                   <CardDescription>{provider.summary}</CardDescription>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Key ver</p>
-                      <p className="text-xs mt-0.5">{row?.keyVersion ?? "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Updated</p>
-                      <p className="text-xs mt-0.5">{row ? formatRelativeTime(row.updatedAt) : "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Expires</p>
-                      <p className="text-xs mt-0.5">{row?.expiresAt ? formatAbsoluteTime(row.expiresAt) : "No expiry"}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Owner</p>
-                      <p className="text-xs mt-0.5">{row?.metadata?.owner ?? "Unassigned"}</p>
-                    </div>
-                  </div>
-                  {(row?.metadata?.label || row?.metadata?.notes) && (
-                    <div className="mt-3 pt-3 border-t space-y-1">
-                      {row?.metadata?.label && (
-                        <p className="text-xs font-medium">{row.metadata.label}</p>
+                  {isConfigured ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                            Updated
+                          </p>
+                          <p className="mt-0.5 text-xs">
+                            {formatRelativeTime(row.updatedAt)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                            Owner
+                          </p>
+                          <p className="mt-0.5 text-xs">
+                            {row.metadata?.owner ?? "Unassigned"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                            Expires
+                          </p>
+                          <p className="mt-0.5 text-xs">
+                            {row.expiresAt ? formatAbsoluteTime(row.expiresAt) : "No expiry"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                            Key ver
+                          </p>
+                          <p className="mt-0.5 text-xs">v{row.keyVersion}</p>
+                        </div>
+                      </div>
+                      {(row.metadata?.label || row.metadata?.notes) && (
+                        <div className="border-t pt-3 space-y-1">
+                          {row.metadata?.label && (
+                            <p className="text-xs font-medium">{row.metadata.label}</p>
+                          )}
+                          {row.metadata?.notes && (
+                            <p className="text-xs text-muted-foreground">
+                              {row.metadata.notes}
+                            </p>
+                          )}
+                        </div>
                       )}
-                      {row?.metadata?.notes && (
-                        <p className="text-xs text-muted-foreground">{row.metadata.notes}</p>
-                      )}
+                    </>
+                  ) : (
+                    <div className="border-t pt-3">
+                      <p className="text-xs text-muted-foreground">
+                        No secret configured for this provider in the current scope.
+                      </p>
                     </div>
                   )}
                 </CardContent>
 
-                <CardFooter className="gap-2">
+                <CardFooter className="gap-2 border-t/80">
                   <Button
                     size="xs"
                     onClick={() => {
@@ -325,7 +344,7 @@ export function ConnectionsPage({
                     disabled={isSubmitting}
                   >
                     <Plus size={12} data-icon="inline-start" />
-                    {isConfigured ? "Replace" : "Add"}
+                    {isConfigured ? "Replace secret" : "Add secret"}
                   </Button>
                   <Button
                     size="xs"
@@ -337,7 +356,7 @@ export function ConnectionsPage({
                     disabled={isSubmitting || !isConfigured}
                   >
                     <PencilSimple size={12} data-icon="inline-start" />
-                    Edit
+                    Details
                   </Button>
                   <Button
                     size="xs"
