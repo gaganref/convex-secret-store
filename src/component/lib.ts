@@ -225,12 +225,6 @@ const updateWrappedDEKResultValidator = v.union(
   }),
 );
 
-const cleanupResultValidator = v.object({
-  deletedSecrets: v.number(),
-  deletedEvents: v.number(),
-  isDone: v.boolean(),
-});
-
 export const put = mutation({
   args: {
     namespace: v.optional(v.string()),
@@ -661,64 +655,5 @@ export const updateWrappedDEK = mutation({
       },
     });
     return { ok: true as const, updatedAt };
-  },
-});
-
-export const cleanup = mutation({
-  args: {
-    retentionMs: v.number(),
-    batchSize: v.number(),
-  },
-  returns: cleanupResultValidator,
-  handler: async (ctx, args) => {
-    if (!Number.isInteger(args.retentionMs) || args.retentionMs <= 0) {
-      throw new ConvexError({
-        code: "invalid_argument",
-        message: "retentionMs must be a positive integer",
-      });
-    }
-    if (!Number.isInteger(args.batchSize) || args.batchSize <= 0) {
-      throw new ConvexError({
-        code: "invalid_argument",
-        message: "batchSize must be a positive integer",
-      });
-    }
-
-    const now = Date.now();
-    const secretBudget = Math.ceil(args.batchSize / 2);
-    const eventBudget = Math.floor(args.batchSize / 2);
-    const expiredSecrets = await ctx.db
-      .query("secrets")
-      .withIndex("by_expires_at", (q) =>
-        q.gte("expiresAt", 0).lt("expiresAt", now),
-      )
-      .take(secretBudget);
-
-    for (const secret of expiredSecrets) {
-      await recordEvent(ctx, {
-        secretId: secret._id,
-        namespace: secret.namespace,
-        name: secret.name,
-        type: "deleted",
-        metadata: { deletedReason: "expired_cleanup" },
-      });
-      await ctx.db.delete(secret._id);
-    }
-
-    const cutoff = now - args.retentionMs;
-    const oldEvents = await ctx.db
-      .query("secretEvents")
-      .withIndex("by_created_at", (q) => q.lt("createdAt", cutoff))
-      .take(eventBudget);
-    for (const event of oldEvents) {
-      await ctx.db.delete(event._id);
-    }
-
-    return {
-      deletedSecrets: expiredSecrets.length,
-      deletedEvents: oldEvents.length,
-      isDone:
-        expiredSecrets.length < secretBudget && oldEvents.length < eventBudget,
-    };
   },
 });

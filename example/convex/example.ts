@@ -224,15 +224,26 @@ export const runRotationBatch = mutation({
 export const runCleanup = mutation({
   args: {
     retentionMs: v.optional(v.number()),
-    batchSize: v.optional(v.number()),
   },
   returns: {
-    deletedSecrets: v.number(),
-    deletedEvents: v.number(),
+    deleted: v.number(),
     isDone: v.boolean(),
   },
   handler: async (ctx, args) => {
-    return await secrets.cleanup(ctx, args);
+    return await secrets.cleanupSecrets(ctx, args);
+  },
+});
+
+export const runEventCleanup = mutation({
+  args: {
+    retentionMs: v.optional(v.number()),
+  },
+  returns: {
+    deleted: v.number(),
+    isDone: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    return await secrets.cleanupEvents(ctx, args);
   },
 });
 

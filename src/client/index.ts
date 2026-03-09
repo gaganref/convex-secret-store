@@ -6,8 +6,10 @@ export type { SecretStoreClientErrorCode } from "./errors.js";
 export type { SecretStoreOptions } from "./options.js";
 
 export type {
-  CleanupArgs,
-  CleanupResult,
+  CleanupEventsArgs,
+  CleanupEventsResult,
+  CleanupSecretsArgs,
+  CleanupSecretsResult,
   GetArgs,
   GetResult,
   HasArgs,

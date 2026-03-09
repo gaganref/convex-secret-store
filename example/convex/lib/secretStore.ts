@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { components } from "../_generated/api.js";
-import { SecretStore } from "convex-secret-store";
+import { SecretStore } from "../../../src/client/index.js";
 
 // Demo-only fixed keys. Real apps should load KEKs from environment variables
 // or another secret-management system.

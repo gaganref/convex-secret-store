@@ -134,4 +134,27 @@ describe("example", () => {
     });
     expect(result2.seeded).toBe(0);
   });
+
+  test("runCleanup and runEventCleanup expose the split maintenance operations", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.putSecret, {
+      workspace: "acme",
+      environment: "production",
+      name: "TEMP_SECRET",
+      value: "temp-value",
+      ttlMs: 1,
+    });
+
+    vi.setSystemTime(new Date("2026-10-10T00:00:00.000Z"));
+
+    const secretCleanup = await t.mutation(api.example.runCleanup, {
+      retentionMs: 24 * 60 * 60 * 1000,
+    });
+    expect(secretCleanup.deleted).toBe(1);
+
+    const eventCleanup = await t.mutation(api.example.runEventCleanup, {
+      retentionMs: 24 * 60 * 60 * 1000,
+    });
+    expect(eventCleanup.deleted).toBeGreaterThanOrEqual(1);
+  });
 });

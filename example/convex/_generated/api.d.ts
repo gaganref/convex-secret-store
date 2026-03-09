@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as cleanup from "../cleanup.js";
+import type * as crons from "../crons.js";
 import type * as example from "../example.js";
 import type * as http from "../http.js";
 import type * as lib_secretStore from "../lib/secretStore.js";
@@ -19,6 +21,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  cleanup: typeof cleanup;
+  crons: typeof crons;
   example: typeof example;
   http: typeof http;
   "lib/secretStore": typeof lib_secretStore;
@@ -51,5 +55,5 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
-  secretStore: import("convex-secret-store/_generated/component.js").ComponentApi<"secretStore">;
+  secretStore: import("../../../src/component/_generated/component.js").ComponentApi<"secretStore">;
 };

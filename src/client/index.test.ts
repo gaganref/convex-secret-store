@@ -309,18 +309,22 @@ describe("SecretStore client", () => {
     );
   });
 
-  test("cleanup validates retention and batch arguments", async () => {
+  test("cleanupSecrets and cleanupEvents validate retention arguments", async () => {
     const client = new SecretStore(components.secretStore, {
       keys: [{ version: 1, value: KEY_V1 }],
     });
     const ctx = {} as RunMutationCtx;
 
-    await expect(client.cleanup(ctx, { retentionMs: 0 })).rejects.toSatisfy(
+    await expect(
+      client.cleanupSecrets(ctx, { retentionMs: 0 }),
+    ).rejects.toSatisfy(
       (error: unknown) =>
         isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
     );
 
-    await expect(client.cleanup(ctx, { batchSize: 0 })).rejects.toSatisfy(
+    await expect(
+      client.cleanupEvents(ctx, { retentionMs: 0 }),
+    ).rejects.toSatisfy(
       (error: unknown) =>
         isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
     );

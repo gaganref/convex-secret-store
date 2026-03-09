@@ -37,10 +37,13 @@ export function ActivityPage({
   const [typeFilter, setTypeFilter] = useState<EventFilter>("all");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+  type ActivityRow = NonNullable<
+    ReturnType<typeof useQuery<typeof api.example.listActivity>>
+  >["page"][number];
 
   const filtered = useMemo(() => {
     const rows = activity?.page ?? [];
-    return rows.filter((event) => {
+    return rows.filter((event: ActivityRow) => {
       if (typeFilter !== "all" && event.type !== typeFilter) return false;
       if (deferredSearch.length === 0) return true;
       return event.name.toLowerCase().includes(deferredSearch);
@@ -135,7 +138,7 @@ export function ActivityPage({
             <span>Type</span>
             <span>Detail</span>
           </div>
-          {filtered.map((event) => (
+          {filtered.map((event: ActivityRow) => (
             <div
               key={event.eventId}
               className="grid gap-2 border-t border-border px-4 py-2.5 first:border-t-0 md:grid-cols-[140px_minmax(0,1fr)_80px_auto] md:items-center"

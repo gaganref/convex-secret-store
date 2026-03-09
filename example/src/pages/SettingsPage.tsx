@@ -29,14 +29,18 @@ export function SettingsPage({
   });
   const runRotationBatch = useMutation(api.example.runRotationBatch);
   const runCleanup = useMutation(api.example.runCleanup);
+  const runEventCleanup = useMutation(api.example.runEventCleanup);
   const seedDemoData = useMutation(api.example.seedDemoData);
 
   const [operationState, setOperationState] = useState<string | null>(null);
   const [rotationResult, setRotationResult] = useState<Awaited<
     ReturnType<typeof runRotationBatch>
   > | null>(null);
-  const [cleanupResult, setCleanupResult] = useState<Awaited<
+  const [secretCleanupResult, setSecretCleanupResult] = useState<Awaited<
     ReturnType<typeof runCleanup>
+  > | null>(null);
+  const [eventCleanupResult, setEventCleanupResult] = useState<Awaited<
+    ReturnType<typeof runEventCleanup>
   > | null>(null);
   const [seedResult, setSeedResult] = useState<number | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
@@ -63,16 +67,30 @@ export function SettingsPage({
   }
 
   async function handleCleanup() {
-    setOperationState("Cleaning up");
+    setOperationState("Cleaning expired secrets");
     setOperationError(null);
     try {
       const result = await runCleanup({
-        batchSize: 50,
         retentionMs: 30 * 24 * 60 * 60 * 1000,
       });
-      setCleanupResult(result);
+      setSecretCleanupResult(result);
     } catch (error) {
-      setOperationError(getErrorMessage(error, "Cleanup failed."));
+      setOperationError(getErrorMessage(error, "Secret cleanup failed."));
+    } finally {
+      setOperationState(null);
+    }
+  }
+
+  async function handleEventCleanup() {
+    setOperationState("Cleaning audit events");
+    setOperationError(null);
+    try {
+      const result = await runEventCleanup({
+        retentionMs: 180 * 24 * 60 * 60 * 1000,
+      });
+      setEventCleanupResult(result);
+    } catch (error) {
+      setOperationError(getErrorMessage(error, "Event cleanup failed."));
     } finally {
       setOperationState(null);
     }
@@ -227,15 +245,13 @@ export function SettingsPage({
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
                   Cleanup
                 </p>
-                <CardTitle className="mt-0.5">
-                  Delete expired secrets and old events
-                </CardTitle>
+                <CardTitle className="mt-0.5">Delete expired secrets</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Sweep expired secrets and old audit events across the entire
-                mounted secret store in bounded batches.
+                Hard-delete secrets that have remained expired beyond the
+                retention window across the entire mounted secret store.
               </CardDescription>
               <Button
                 size="xs"
@@ -244,18 +260,57 @@ export function SettingsPage({
                 disabled={isOperating}
               >
                 <Broom size={12} data-icon="inline-start" />
-                Run cleanup batch
+                Cleanup expired secrets
               </Button>
-              {cleanupResult && (
+              {secretCleanupResult && (
                 <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="outline">
-                    {cleanupResult.deletedSecrets} secrets deleted
+                    {secretCleanupResult.deleted} secrets deleted
                   </Badge>
+                  <Badge
+                    variant={secretCleanupResult.isDone ? "default" : "outline"}
+                  >
+                    {secretCleanupResult.isDone ? "Complete" : "More remain"}
+                  </Badge>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card size="sm">
+            <CardHeader>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                  Cleanup
+                </p>
+                <CardTitle className="mt-0.5">
+                  Delete old audit events
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <CardDescription>
+                Hard-delete old audit events independently from secret cleanup.
+                This is usually kept on a longer retention window.
+              </CardDescription>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void handleEventCleanup()}
+                disabled={isOperating}
+              >
+                <Broom size={12} data-icon="inline-start" />
+                Cleanup audit events
+              </Button>
+              {eventCleanupResult && (
+                <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="outline">
-                    {cleanupResult.deletedEvents} events deleted
+                    {eventCleanupResult.deleted} events deleted
                   </Badge>
-                  <Badge variant={cleanupResult.isDone ? "default" : "outline"}>
-                    {cleanupResult.isDone ? "Complete" : "More remain"}
+                  <Badge
+                    variant={eventCleanupResult.isDone ? "default" : "outline"}
+                  >
+                    {eventCleanupResult.isDone ? "Complete" : "More remain"}
                   </Badge>
                 </div>
               )}

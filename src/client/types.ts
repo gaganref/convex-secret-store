@@ -13,7 +13,12 @@ type ListQueryResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
 type ListEventsQueryResult = FunctionReturnType<
   ComponentApi["lib"]["listEvents"]
 >;
-type CleanupMutationResult = FunctionReturnType<ComponentApi["lib"]["cleanup"]>;
+type CleanupSecretsMutationResult = FunctionReturnType<
+  ComponentApi["cleanup"]["cleanupSecrets"]
+>;
+type CleanupEventsMutationResult = FunctionReturnType<
+  ComponentApi["cleanup"]["cleanupEvents"]
+>;
 
 export type SecretStoreTypeOptions = {
   namespace?: string;
@@ -177,12 +182,17 @@ export type RotateKeysResult = {
   continueCursor: string | null;
 };
 
-export type CleanupArgs = {
+export type CleanupSecretsArgs = {
   retentionMs?: number;
-  batchSize?: number;
 };
 
-export type CleanupResult = CleanupMutationResult;
+export type CleanupSecretsResult = CleanupSecretsMutationResult;
+
+export type CleanupEventsArgs = {
+  retentionMs?: number;
+};
+
+export type CleanupEventsResult = CleanupEventsMutationResult;
 
 export type RunMutationCtx = {
   runMutation: <

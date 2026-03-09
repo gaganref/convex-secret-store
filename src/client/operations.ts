@@ -17,8 +17,10 @@ import {
   type SecretStoreOptions,
 } from "./options.js";
 import type {
-  CleanupArgs,
-  CleanupResult,
+  CleanupEventsArgs,
+  CleanupEventsResult,
+  CleanupSecretsArgs,
+  CleanupSecretsResult,
   GetArgs,
   GetResult,
   HasArgs,
@@ -40,8 +42,8 @@ import type {
 } from "./types.js";
 
 const DEFAULT_ROTATION_BATCH_SIZE = 100;
-const DEFAULT_CLEANUP_BATCH_SIZE = 100;
-const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_SECRET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_EVENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
 function readNamespace(args: object): string | undefined {
   if (!("namespace" in args)) {
@@ -456,34 +458,56 @@ export class SecretStore<
   }
 
   /**
-   * Delete expired secrets and old audit rows in bounded batches.
+   * Hard-delete expired secrets that have been past their expiry timestamp for
+   * at least the retention window.
    *
-   * Expired secret deletion writes matching `deleted` audit events with
-   * `deletedReason: "expired_cleanup"` before removing the secret row.
+   * The cleanup mutation processes up to 100 rows per run and automatically
+   * reschedules itself while backlog remains. Deleting an expired secret writes
+   * a final `deleted` audit event with `deletedReason: "expired_cleanup"`.
    */
-  async cleanup(
+  async cleanupSecrets(
     ctx: RunMutationCtx,
-    args: CleanupArgs = {},
-  ): Promise<CleanupResult> {
-    const retentionMs = args.retentionMs ?? DEFAULT_RETENTION_MS;
-    const batchSize = args.batchSize ?? DEFAULT_CLEANUP_BATCH_SIZE;
-
+    args: CleanupSecretsArgs = {},
+  ): Promise<CleanupSecretsResult> {
+    const retentionMs = args.retentionMs ?? DEFAULT_SECRET_RETENTION_MS;
     if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
       throw invalidArgumentError(
         "retentionMs must be a positive finite number",
       );
     }
-    if (!Number.isInteger(batchSize) || batchSize <= 0) {
-      throw invalidArgumentError("batchSize must be a positive integer");
+
+    try {
+      return await ctx.runMutation(this.component.cleanup.cleanupSecrets, {
+        retentionMs,
+      });
+    } catch (error) {
+      throw toThrownError(error, "cleanup secrets");
+    }
+  }
+
+  /**
+   * Hard-delete audit events older than the retention window.
+   *
+   * Event cleanup is independent from secret cleanup and may keep audit rows
+   * for much longer than expired secret rows remain in storage.
+   */
+  async cleanupEvents(
+    ctx: RunMutationCtx,
+    args: CleanupEventsArgs = {},
+  ): Promise<CleanupEventsResult> {
+    const retentionMs = args.retentionMs ?? DEFAULT_EVENT_RETENTION_MS;
+    if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
+      throw invalidArgumentError(
+        "retentionMs must be a positive finite number",
+      );
     }
 
     try {
-      return await ctx.runMutation(this.component.lib.cleanup, {
+      return await ctx.runMutation(this.component.cleanup.cleanupEvents, {
         retentionMs,
-        batchSize,
       });
     } catch (error) {
-      throw toThrownError(error, "cleanup");
+      throw toThrownError(error, "cleanup events");
     }
   }
 }

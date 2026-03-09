@@ -361,22 +361,82 @@ Important semantics:
 - stale rows are skipped safely and can be retried in a later batch
 - do not remove an old KEK until rotation is fully drained
 
-### Cleanup
+### Cleanup Expired Secrets
 
-Run bounded cleanup for expired secrets and old audit events:
+Hard-delete secrets that have remained expired past the retention window:
 
 ```ts
-const result = await secrets.cleanup(ctx, {
+const result = await secrets.cleanupSecrets(ctx, {
   retentionMs: 30 * 24 * 60 * 60 * 1000,
-  batchSize: 100,
 });
 ```
 
-What cleanup does:
+What `cleanupSecrets` does:
 
-- deletes expired secret rows
-- writes a `deleted` audit event with `deletedReason: "expired_cleanup"`
-- deletes audit rows older than `retentionMs`
+- deletes expired secret rows once they are older than the retention window
+- writes a final `deleted` audit event with `deletedReason: "expired_cleanup"`
+- processes up to 100 rows per run and automatically reschedules itself while
+  backlog remains
+
+### Cleanup Audit Events
+
+Hard-delete audit events older than the retention window:
+
+```ts
+const result = await secrets.cleanupEvents(ctx, {
+  retentionMs: 180 * 24 * 60 * 60 * 1000,
+});
+```
+
+What `cleanupEvents` does:
+
+- deletes audit rows independently from secret cleanup
+- lets audit history outlive expired secrets when you want longer retention
+- processes up to 100 rows per run and automatically reschedules itself while
+  backlog remains
+
+Recommended host-app pattern:
+
+```ts
+// convex/cleanup.ts
+import { internalMutation } from "./_generated/server";
+import { secrets } from "./secrets";
+
+export const cleanupSecrets = internalMutation({
+  handler: (ctx) =>
+    secrets.cleanupSecrets(ctx, {
+      retentionMs: 30 * 24 * 60 * 60 * 1000,
+    }),
+});
+
+export const cleanupEvents = internalMutation({
+  handler: (ctx) =>
+    secrets.cleanupEvents(ctx, {
+      retentionMs: 180 * 24 * 60 * 60 * 1000,
+    }),
+});
+```
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+
+const crons = cronJobs();
+
+crons.interval(
+  "cleanup expired secrets",
+  { hours: 24 },
+  internal.cleanup.cleanupSecrets,
+);
+crons.interval(
+  "cleanup secret audit events",
+  { hours: 24 },
+  internal.cleanup.cleanupEvents,
+);
+
+export default crons;
+```
 
 ## Rotation Workflow
 

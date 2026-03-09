@@ -23,14 +23,23 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
-    lib: {
-      cleanup: FunctionReference<
+    cleanup: {
+      cleanupEvents: FunctionReference<
         "mutation",
         "internal",
-        { batchSize: number; retentionMs: number },
-        { deletedEvents: number; deletedSecrets: number; isDone: boolean },
+        { retentionMs: number },
+        { deleted: number; isDone: boolean },
         Name
       >;
+      cleanupSecrets: FunctionReference<
+        "mutation",
+        "internal",
+        { retentionMs: number },
+        { deleted: number; isDone: boolean },
+        Name
+      >;
+    };
+    lib: {
       get: FunctionReference<
         "query",
         "internal",

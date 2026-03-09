@@ -57,7 +57,9 @@ export function SecretsPage({
   const stats = useMemo(() => {
     const page = rows ?? [];
     const total = page.length;
-    const expired = page.filter((r) => r.effectiveState === "expired").length;
+    const expired = page.filter(
+      (row: SecretRow) => row.effectiveState === "expired",
+    ).length;
     return { total, expired, active: total - expired };
   }, [rows]);
   const secretRows = rows ?? [];
@@ -205,7 +207,7 @@ export function SecretsPage({
             <span>Key</span>
             <span>Actions</span>
           </div>
-          {secretRows.map((row) => (
+          {secretRows.map((row: SecretRow) => (
             <SecretTableRow
               key={row.name}
               row={row}
