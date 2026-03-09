@@ -211,6 +211,27 @@ describe("SecretStore client", () => {
     );
   });
 
+  test("has, update, and remove follow expected edge-result paths", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    expect(await client.has(queryCtx, { name: "missing" })).toBe(false);
+
+    expect(
+      await client.update(mutationCtx, {
+        name: "missing",
+        metadata: { owner: "nobody" },
+      }),
+    ).toEqual({ updated: false });
+
+    expect(await client.remove(mutationCtx, { name: "missing" })).toEqual({
+      removed: false,
+    });
+  });
+
   test("listEvents rejects name + type in the client surface", async () => {
     const client = new SecretStore(components.secretStore, {
       keys: [{ version: 1, value: KEY_V1 }],
@@ -228,6 +249,78 @@ describe("SecretStore client", () => {
         paginationOpts: { numItems: 10, cursor: null },
       }),
     ).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+  });
+
+  test("listEvents supports secretId lookups without namespace", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    const created = await client.put(mutationCtx, {
+      name: "slack",
+      value: "xoxb-secret",
+    });
+
+    const events = await client.listEvents(queryCtx, {
+      secretId: created.secretId,
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.secretId).toBe(created.secretId);
+    expect(events.page[0]?.type).toBe("created");
+  });
+
+  test("rotateKeys validates version and batch arguments", async () => {
+    const client = new SecretStore(components.secretStore, {
+      keys: [
+        { version: 2, value: KEY_V2 },
+        { version: 1, value: KEY_V1 },
+      ],
+    });
+    const ctx = {} as RunMutationCtx & RunQueryCtx;
+
+    await expect(client.rotateKeys(ctx, { fromVersion: -1 })).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+
+    await expect(client.rotateKeys(ctx, { fromVersion: 2 })).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+
+    await expect(client.rotateKeys(ctx, { fromVersion: 9 })).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) &&
+        error.code === "KEY_VERSION_UNAVAILABLE",
+    );
+
+    await expect(
+      client.rotateKeys(ctx, { fromVersion: 1, batchSize: 0 }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+  });
+
+  test("cleanup validates retention and batch arguments", async () => {
+    const client = new SecretStore(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+    const ctx = {} as RunMutationCtx;
+
+    await expect(client.cleanup(ctx, { retentionMs: 0 })).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+
+    await expect(client.cleanup(ctx, { batchSize: 0 })).rejects.toSatisfy(
       (error: unknown) =>
         isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
     );
@@ -253,6 +346,36 @@ describe("error and option contracts", () => {
         new SecretStore(components.secretStore, {
           keys: [],
         }),
+    ).toThrow(SecretStoreClientError);
+  });
+
+  test("normalizeSecretStoreOptions rejects invalid key material and defaults", () => {
+    expect(() =>
+      normalizeSecretStoreOptions({
+        keys: [{ version: 1, value: "" }],
+      }),
+    ).toThrow(SecretStoreClientError);
+
+    expect(() =>
+      normalizeSecretStoreOptions({
+        keys: [
+          { version: 1, value: KEY_V1 },
+          { version: 1, value: KEY_V2 },
+        ],
+      }),
+    ).toThrow(SecretStoreClientError);
+
+    expect(() =>
+      normalizeSecretStoreOptions({
+        keys: [{ version: 1, value: Buffer.alloc(16, 1).toString("base64") }],
+      }),
+    ).toThrow(SecretStoreClientError);
+
+    expect(() =>
+      normalizeSecretStoreOptions({
+        keys: [{ version: 1, value: KEY_V1 }],
+        defaults: { ttlMs: -1 },
+      }),
     ).toThrow(SecretStoreClientError);
   });
 
