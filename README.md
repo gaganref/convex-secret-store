@@ -440,32 +440,96 @@ export default crons;
 
 ## Rotation Workflow
 
-Recommended flow:
-
-1. start with one key:
-
-```ts
-keys: [{ version: 1, value: process.env.SECRET_STORE_KEY_V1! }];
-```
-
-2. deploy a new active key first:
+`keys[0]` is the active write key. Any remaining entries are older
+decrypt-only keys.
 
 ```ts
 keys: [
-  { version: 2, value: process.env.SECRET_STORE_KEY_V2! },
-  { version: 1, value: process.env.SECRET_STORE_KEY_V1! },
+  { version: 3, value: process.env.SECRET_STORE_KEY_V3! }, // active
+  { version: 2, value: process.env.SECRET_STORE_KEY_V2! }, // decrypt-only
+  { version: 1, value: process.env.SECRET_STORE_KEY_V1! }, // decrypt-only
 ];
 ```
 
-3. new writes use version `2`
-4. old rows on version `1` still decrypt
-5. run `rotateKeys({ fromVersion: 1 })` until `isDone === true`
-6. deploy again with version `1` removed
+Recommended flow:
+
+1. prepend a new key version to `keys`
+2. deploy so new writes start using that version
+3. run rotation for each older version you want to drain
+4. keep old keys configured until those rows are fully rotated
+5. deploy again with drained old versions removed
+
+Recommended host-app wrappers:
+
+See [`example/convex/rotate.ts`](./example/convex/rotate.ts) for a working
+version of this pattern.
+
+```ts
+// convex/rotate.ts
+import { v } from "convex/values";
+import { internalAction, type ActionCtx } from "./_generated/server";
+import { secrets } from "./secrets";
+
+async function rotateVersion(ctx: ActionCtx, fromVersion: number) {
+  let cursor: string | null = null;
+
+  while (true) {
+    const result = await secrets.rotateKeys(ctx, {
+      fromVersion,
+      batchSize: 100,
+      cursor,
+    });
+
+    if (result.isDone) {
+      return result;
+    }
+
+    cursor = result.continueCursor ?? null;
+  }
+}
+
+export const rotateSecretStoreVersion = internalAction({
+  args: { fromVersion: v.number() },
+  handler: async (ctx, args) => {
+    return await rotateVersion(ctx, args.fromVersion);
+  },
+});
+
+export const rotateSecretStoreToLatest = internalAction({
+  handler: async (ctx) => {
+    for (const fromVersion of [2, 1]) {
+      await rotateVersion(ctx, fromVersion);
+    }
+  },
+});
+```
+
+Optional temporary cron during a rotation window:
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+
+const crons = cronJobs();
+
+crons.interval(
+  "drain secret-store old keys",
+  { minutes: 10 },
+  internal.rotate.rotateSecretStoreToLatest,
+);
+
+export default crons;
+```
+
+Cleanup is a good permanent cron. Rotation is usually a temporary cron or a
+manual admin action during a migration window.
 
 This component does not use explicit locks during rotation. Instead, it uses
 optimistic concurrency checks so concurrent writes do not corrupt rows. If a row
-changes while rotation is in flight, the rewrap attempt is skipped and can be
-retried later.
+changes while rotation is in flight, the rewrap attempt is skipped safely and
+retried by a later pass. A restart scan may return `continueCursor: null`; keep
+looping until `isDone === true`.
 
 ## Security Model
 
@@ -510,14 +574,13 @@ Options:
 ## Example App
 
 See the [example/](./example) directory for a full reference app called
-**Integration Vault**.
+**Secret Store**.
 
 It demonstrates:
 
-- `Connections` — store, replace, edit, and remove provider secrets
-- `Usage` — safe server-side secret consumption without plaintext browser reveal
+- `Secrets` — store, replace, preview, and remove environment secrets
 - `Activity` — audit history
-- `Advanced` — key rotation and cleanup flows
+- `Settings` — key rotation, cleanup, and demo seeding flows
 
 > **Security note:** The example app keeps secret management intentionally
 > simple. In a real app, gate secret write/read flows behind your authentication

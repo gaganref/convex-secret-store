@@ -13,6 +13,7 @@ import type * as crons from "../crons.js";
 import type * as example from "../example.js";
 import type * as http from "../http.js";
 import type * as lib_secretStore from "../lib/secretStore.js";
+import type * as rotate from "../rotate.js";
 
 import type {
   ApiFromModules,
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   example: typeof example;
   http: typeof http;
   "lib/secretStore": typeof lib_secretStore;
+  rotate: typeof rotate;
 }>;
 
 /**

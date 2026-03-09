@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { initConvexTest } from "./setup.test";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 describe("example", () => {
   beforeEach(() => {
@@ -65,6 +65,41 @@ describe("example", () => {
       environment: "production",
     });
     expect(after.versionCounts).toContainEqual({ keyVersion: 2, count: 1 });
+  });
+
+  test("rotation helpers drain one version or all old versions", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.seedLegacySecret, {
+      workspace: "acme",
+      environment: "production",
+      name: "JWT_SIGNING_KEY",
+      value: "legacy-key-value",
+    });
+
+    const singleVersion = await t.action(
+      internal.rotate.rotateSecretStoreVersion,
+      { fromVersion: 1 },
+    );
+    expect(singleVersion.fromVersion).toBe(1);
+    expect(singleVersion.toVersion).toBe(2);
+    expect(singleVersion.rotated).toBe(1);
+
+    await t.mutation(api.example.seedLegacySecret, {
+      workspace: "acme",
+      environment: "production",
+      name: "JWT_SIGNING_KEY_2",
+      value: "legacy-key-value",
+    });
+
+    const allVersions = await t.action(internal.rotate.rotateSecretStoreToLatest);
+    expect(allVersions.activeVersion).toBe(2);
+    expect(allVersions.drainedVersions).toContainEqual({
+      fromVersion: 1,
+      toVersion: 2,
+      processed: 1,
+      rotated: 1,
+      skipped: 0,
+    });
   });
 
   test("removeSecret deletes the secret", async () => {
