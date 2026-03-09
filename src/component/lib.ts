@@ -55,7 +55,7 @@ async function recordEvent(
     namespace: string | undefined;
     name: string;
     type: "created" | "updated" | "deleted" | "rotated";
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   },
 ) {
   await ctx.db.insert("secretEvents", {

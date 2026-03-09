@@ -231,8 +231,10 @@ const result = await secrets.put(ctx, {
 Notes:
 
 - `ttlMs` is converted to an absolute `expiresAt`
-- pass `metadata: null` only on overwrite if you want to remove metadata
-- values larger than 64 KiB are rejected
+- when overwriting and omitting `metadata` or `ttlMs`, existing metadata and
+  expiry are preserved
+- use `update(..., { metadata: null, expiresAt: null })` to clear optional
+  fields
 
 ### Get
 
