@@ -132,9 +132,7 @@ export function SecretsPage({
         name: replaceTarget.name,
         value,
         ttlMs:
-          ttlDays === undefined
-            ? undefined
-            : ttlDays * 24 * 60 * 60 * 1000,
+          ttlDays === undefined ? undefined : ttlDays * 24 * 60 * 60 * 1000,
       });
       setReplaceTarget(null);
     } catch (error) {
@@ -478,7 +476,10 @@ function SecretTableRow({
     <div className="grid gap-2 border-t border-border px-4 py-3 first:border-t-0 md:grid-cols-[minmax(0,1fr)_80px_120px_120px_60px_auto] md:items-center">
       <p className="text-sm font-mono font-medium truncate">{row.name}</p>
       <div>
-        <Badge variant={isExpired ? "destructive" : "default"} className="text-[10px]">
+        <Badge
+          variant={isExpired ? "destructive" : "default"}
+          className="text-[10px]"
+        >
           {isExpired ? "Expired" : "Active"}
         </Badge>
       </div>
@@ -538,9 +539,7 @@ function PreviewDialog({
 }) {
   const preview = useQuery(
     api.example.previewSecret,
-    name === null
-      ? "skip"
-      : { workspace, environment, name },
+    name === null ? "skip" : { workspace, environment, name },
   );
 
   return (

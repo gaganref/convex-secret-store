@@ -1,46 +1,14 @@
 import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
-import { components } from "./_generated/api.js";
 import { v } from "convex/values";
-import { SecretStore } from "convex-secret-store";
-
-// Demo-only fixed keys. Real apps should load KEKs from environment variables
-// or another secret-management system.
-const DEMO_KEYS = [
-  { version: 2, value: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=" },
-  { version: 1, value: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=" },
-] as const;
-
-export const environmentValidator = v.union(
-  v.literal("development"),
-  v.literal("staging"),
-  v.literal("production"),
-);
-
-export type Environment = "development" | "staging" | "production";
-export type Namespace = `${string}:${Environment}`;
-
-const secrets = new SecretStore<{
-  namespace: Namespace;
-  metadata: Record<string, string>;
-}>(components.secretStore, {
-  keys: [...DEMO_KEYS],
-});
-
-const legacySecrets = new SecretStore<{
-  namespace: Namespace;
-  metadata: Record<string, string>;
-}>(components.secretStore, {
-  keys: [DEMO_KEYS[1]],
-});
-
-function toNamespace(workspace: string, environment: Environment): Namespace {
-  const trimmed = workspace.trim();
-  if (trimmed.length === 0) {
-    throw new Error("workspace must not be empty");
-  }
-  return `${trimmed}:${environment}` as Namespace;
-}
+import {
+  activeDemoVersion,
+  configuredDemoVersions,
+  environmentValidator,
+  legacySecrets,
+  secrets,
+  toNamespace,
+} from "./lib/secretStore.js";
 
 function maskSecret(value: string) {
   if (value.length <= 8) {
@@ -222,8 +190,8 @@ export const getSettingsSnapshot = query({
     }
 
     return {
-      activeVersion: DEMO_KEYS[0].version,
-      configuredVersions: DEMO_KEYS.map((k) => k.version),
+      activeVersion: activeDemoVersion,
+      configuredVersions: configuredDemoVersions,
       totalSecrets: rows.length,
       expiredSecrets,
       versionCounts: Array.from(versionCounts.entries()).map(
@@ -300,7 +268,10 @@ export const seedDemoData = mutation({
   handler: async (ctx, args) => {
     const namespace = toNamespace(args.workspace, args.environment);
     const demoSecrets = [
-      { name: "DATABASE_URL", value: "postgresql://user:pass@db.example.com:5432/myapp" },
+      {
+        name: "DATABASE_URL",
+        value: "postgresql://user:pass@db.example.com:5432/myapp",
+      },
       { name: "OPENAI_API_KEY", value: "sk-proj-abc123def456ghi789" },
       { name: "STRIPE_SECRET_KEY", value: "sk_live_51abc123DEF456" },
       { name: "RESEND_API_KEY", value: "re_abc123_def456ghi789" },

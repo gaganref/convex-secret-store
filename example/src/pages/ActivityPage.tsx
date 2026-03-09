@@ -13,7 +13,13 @@ import {
 } from "@/components/ui/empty";
 import { type Environment } from "@/lib/navigation";
 
-const EVENT_TYPES = ["all", "created", "updated", "rotated", "deleted"] as const;
+const EVENT_TYPES = [
+  "all",
+  "created",
+  "updated",
+  "rotated",
+  "deleted",
+] as const;
 type EventFilter = (typeof EVENT_TYPES)[number];
 
 export function ActivityPage({
@@ -146,7 +152,10 @@ export function ActivityPage({
                 {event.name}
               </p>
               <div>
-                <Badge variant={badgeVariant(event.type)} className="text-[10px]">
+                <Badge
+                  variant={badgeVariant(event.type)}
+                  className="text-[10px]"
+                >
                   {event.type}
                 </Badge>
               </div>

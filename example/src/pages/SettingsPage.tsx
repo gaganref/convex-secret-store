@@ -154,7 +154,9 @@ export function SettingsPage({
                   scope
                 </Badge>
                 <Badge
-                  variant={snapshot.expiredSecrets > 0 ? "destructive" : "outline"}
+                  variant={
+                    snapshot.expiredSecrets > 0 ? "destructive" : "outline"
+                  }
                 >
                   {snapshot.expiredSecrets > 0
                     ? formatCountLabel(snapshot.expiredSecrets, "expired")
@@ -171,7 +173,9 @@ export function SettingsPage({
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
                   Rotation
                 </p>
-                <CardTitle className="mt-0.5">Rewrap old key versions</CardTitle>
+                <CardTitle className="mt-0.5">
+                  Rewrap old key versions
+                </CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -206,7 +210,9 @@ export function SettingsPage({
                   <Badge variant="outline">
                     {rotationResult.skipped} skipped
                   </Badge>
-                  <Badge variant={rotationResult.isDone ? "default" : "outline"}>
+                  <Badge
+                    variant={rotationResult.isDone ? "default" : "outline"}
+                  >
                     {rotationResult.isDone ? "Complete" : "More remain"}
                   </Badge>
                 </div>
