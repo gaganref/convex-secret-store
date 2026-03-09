@@ -440,8 +440,8 @@ export default crons;
 
 ## Rotation Workflow
 
-`keys[0]` is the active write key. Any remaining entries are older
-decrypt-only keys.
+`keys[0]` is the active write key. Any remaining entries are older decrypt-only
+keys.
 
 ```ts
 keys: [
@@ -573,8 +573,8 @@ Options:
 
 ## Example App
 
-See the [example/](./example) directory for a full reference app called
-**Secret Store**.
+See the [example/](./example) directory for a full reference app called **Secret
+Store**.
 
 It demonstrates:
 

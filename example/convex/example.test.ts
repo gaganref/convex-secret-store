@@ -91,7 +91,9 @@ describe("example", () => {
       value: "legacy-key-value",
     });
 
-    const allVersions = await t.action(internal.rotate.rotateSecretStoreToLatest);
+    const allVersions = await t.action(
+      internal.rotate.rotateSecretStoreToLatest,
+    );
     expect(allVersions.activeVersion).toBe(2);
     expect(allVersions.drainedVersions).toContainEqual({
       fromVersion: 1,
