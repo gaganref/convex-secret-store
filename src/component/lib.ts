@@ -83,11 +83,21 @@ function assertNullableNonNegativeInteger(
   }
 }
 
+function assertValidNamespace(namespace: string | undefined) {
+  if (namespace === "") {
+    throw new ConvexError({
+      code: "invalid_argument",
+      message: "namespace must not be empty",
+    });
+  }
+}
+
 async function getSecretByName(
   ctx: { db: any },
   namespace: string | undefined,
   name: string,
 ) {
+  assertValidNamespace(namespace);
   return await ctx.db
     .query("secrets")
     .withIndex("by_namespace_and_name", (q: any) =>
@@ -439,6 +449,7 @@ export const list = query({
   },
   returns: listResultValidator,
   handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
     const result = await paginator(ctx.db, schema)
       .query("secrets")
       .withIndex("by_namespace_and_updated_at", (q) =>
@@ -466,6 +477,7 @@ export const listEvents = query({
   },
   returns: listEventsResultValidator,
   handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
     const hasSecretId = args.secretId !== undefined;
     const hasName = args.name !== undefined;
     const hasType = args.type !== undefined;

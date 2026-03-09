@@ -24,11 +24,6 @@ type NamespaceArg<TOptions extends SecretStoreTypeOptions> = TOptions extends {
   ? { namespace: N }
   : { namespace?: never };
 
-type NamespaceFilterArg<TOptions extends SecretStoreTypeOptions> =
-  TOptions extends { namespace: infer N extends string }
-    ? { namespace?: N }
-    : { namespace?: never };
-
 type NamespaceOutput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
   namespace: infer N extends string;
 }
@@ -114,7 +109,7 @@ export type UpdateResult = FunctionReturnType<ComponentApi["lib"]["update"]>;
 
 export type ListArgs<
   TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceFilterArg<TOptions> & {
+> = NamespaceArg<TOptions> & {
   paginationOpts: PaginationOptions;
   order?: "asc" | "desc";
 };
@@ -130,15 +125,26 @@ export type ListResult<
   >;
 };
 
-export type ListEventsArgs<
+type ListEventsBySecretIdArgs = {
+  secretId: SecretId;
+  name?: never;
+  type?: never;
+};
+
+type ListEventsByNamespaceArgs<
   TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceFilterArg<TOptions> & {
-  paginationOpts: PaginationOptions;
-  secretId?: SecretId;
+> = NamespaceArg<TOptions> & {
+  secretId?: never;
   name?: string;
   type?: SecretEventType;
-  order?: "asc" | "desc";
 };
+
+export type ListEventsArgs<
+  TOptions extends SecretStoreTypeOptions = Record<never, never>,
+> = {
+  paginationOpts: PaginationOptions;
+  order?: "asc" | "desc";
+} & (ListEventsBySecretIdArgs | ListEventsByNamespaceArgs<TOptions>);
 
 export type ListEventsResult<
   TOptions extends SecretStoreTypeOptions = Record<never, never>,
@@ -164,7 +170,7 @@ export type RotateKeysResult = {
   rotated: number;
   skipped: number;
   isDone: boolean;
-  continueCursor: string;
+  continueCursor: string | null;
 };
 
 export type CleanupArgs = {

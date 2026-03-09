@@ -51,7 +51,16 @@ function readNamespace(args: object): string | undefined {
     return undefined;
   }
   const namespace = (args as { namespace?: unknown }).namespace;
-  return typeof namespace === "string" ? namespace : undefined;
+  if (namespace === undefined) {
+    return undefined;
+  }
+  if (typeof namespace !== "string") {
+    return undefined;
+  }
+  if (namespace.length === 0) {
+    throw invalidArgumentError("namespace must not be empty");
+  }
+  return namespace;
 }
 
 function shouldLog(
@@ -353,14 +362,31 @@ export class SecretStore<
         }
       }
 
+      let isDone = page.isDone;
+      let continueCursor: string | null = page.continueCursor;
+      if (skipped > 0 && page.isDone) {
+        const remaining = await ctx.runQuery(this.component.lib.listByKeyVersion, {
+          fromVersion: args.fromVersion,
+          order: args.order,
+          paginationOpts: {
+            numItems: 1,
+            cursor: null,
+          },
+        });
+        if (remaining.page.length > 0) {
+          isDone = false;
+          continueCursor = null;
+        }
+      }
+
       return {
         fromVersion: args.fromVersion,
         toVersion,
         processed: page.page.length,
         rotated,
         skipped,
-        isDone: page.isDone,
-        continueCursor: page.continueCursor,
+        isDone,
+        continueCursor,
       };
     } catch (error) {
       throw toThrownError(error, `rotate from version ${args.fromVersion}`);

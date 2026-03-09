@@ -139,6 +139,21 @@ describe("component lib", () => {
     ).rejects.toThrow();
   });
 
+  test("empty namespace is rejected", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.mutation(api.lib.put, {
+        namespace: "",
+        name: "openai",
+        encryptedValue: "ciphertext",
+        iv: "iv",
+        wrappedDEK: "wrapped",
+        dekIv: "dekIv",
+        keyVersion: 1,
+      }),
+    ).rejects.toThrow();
+  });
+
   test("cleanup only removes expired secrets and leaves perpetual secrets intact", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, {

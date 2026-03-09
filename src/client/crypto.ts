@@ -74,7 +74,7 @@ function utf8Bytes(value: string): Uint8Array {
 }
 
 function buildAadParts(namespace: string | undefined, name: string) {
-  return namespace === undefined ? ["", name] : [namespace, name];
+  return [namespace ?? null, name];
 }
 
 export function buildValueAAD(

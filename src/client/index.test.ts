@@ -128,6 +128,82 @@ describe("SecretStore client", () => {
     expect(loaded.value).toBe("re_123");
   });
 
+  test("rotateKeys does not report done when a stale row still remains on the old version", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const v1Client = new SecretStore<{
+      metadata: { owner?: string };
+    }>(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    await v1Client.put(mutationCtx, {
+      name: "github",
+      value: "ghp_123",
+      metadata: { owner: "platform" },
+    });
+
+    const rotatingClient = new SecretStore<{
+      metadata: { owner?: string };
+    }>(components.secretStore, {
+      keys: [
+        { version: 2, value: KEY_V2 },
+        { version: 1, value: KEY_V1 },
+      ],
+    });
+
+    let injectedConcurrentUpdate = false;
+    const ctx: RunMutationCtx & RunQueryCtx = {
+      runQuery: (query, args) => t.query(query, args),
+      runMutation: async (mutation, args) => {
+        if (!injectedConcurrentUpdate) {
+          injectedConcurrentUpdate = true;
+          await t.mutation(components.secretStore.lib.update, {
+            name: "github",
+            metadata: { owner: "rotated-later" },
+          });
+        }
+        return await t.mutation(mutation, args);
+      },
+    };
+
+    const result = await rotatingClient.rotateKeys(ctx, {
+      fromVersion: 1,
+      batchSize: 10,
+      cursor: null,
+    });
+
+    expect(result.processed).toBe(1);
+    expect(result.rotated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.isDone).toBe(false);
+    expect(result.continueCursor).toBeNull();
+
+    const listed = await rotatingClient.list(queryCtx, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(listed.page[0]?.keyVersion).toBe(1);
+  });
+
+  test("client rejects empty namespace", async () => {
+    const t = initConvexTest();
+    const { mutationCtx } = ctxFrom(t);
+    const client = new SecretStore<{ namespace: string }>(components.secretStore, {
+      keys: [{ version: 1, value: KEY_V1 }],
+    });
+
+    await expect(
+      client.put(mutationCtx, {
+        namespace: "" as string,
+        name: "openai",
+        value: "sk-secret",
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
+    );
+  });
+
   test("listEvents rejects name + type in the client surface", async () => {
     const client = new SecretStore(components.secretStore, {
       keys: [{ version: 1, value: KEY_V1 }],
@@ -225,6 +301,32 @@ test("client type contracts remain stable", () => {
   // @ts-expect-error namespace is required when configured in the generic.
   const missingNamespace: NamespacedPutArgs = { name: "openai", value: "sk" };
   void missingNamespace;
+
+  type NamespacedListArgs = Parameters<typeof _namespacedClient.list>[1];
+  const validNamespacedListArgs: NamespacedListArgs = {
+    namespace: "env:prod",
+    paginationOpts: { numItems: 10, cursor: null },
+  };
+  void validNamespacedListArgs;
+
+  // @ts-expect-error namespace is required for list when configured in the generic.
+  const missingListNamespace: NamespacedListArgs = {
+    paginationOpts: { numItems: 10, cursor: null },
+  };
+  void missingListNamespace;
+
+  type NamespacedListEventsArgs = Parameters<typeof _namespacedClient.listEvents>[1];
+  const validNamespacedListEventsArgs: NamespacedListEventsArgs = {
+    namespace: "env:prod",
+    paginationOpts: { numItems: 10, cursor: null },
+  };
+  void validNamespacedListEventsArgs;
+
+  // @ts-expect-error namespace is required for namespaced event listing unless querying by secretId.
+  const missingEventsNamespace: NamespacedListEventsArgs = {
+    paginationOpts: { numItems: 10, cursor: null },
+  };
+  void missingEventsNamespace;
 
   const _metadataClient = new SecretStore<{
     metadata: { provider: "openai" | "stripe"; label?: string };

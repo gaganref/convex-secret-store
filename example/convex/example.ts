@@ -371,7 +371,7 @@ export const runRotationBatch = mutation({
     rotated: v.number(),
     skipped: v.number(),
     isDone: v.boolean(),
-    continueCursor: v.string(),
+    continueCursor: v.union(v.string(), v.null()),
   },
   handler: async (ctx, args) => {
     return await secrets.rotateKeys(ctx, args);
