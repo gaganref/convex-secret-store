@@ -1,7 +1,4 @@
-import {
-  invalidArgumentError,
-  runtimeUnavailableError,
-} from "./errors.js";
+import { invalidArgumentError, runtimeUnavailableError } from "./errors.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -81,7 +78,9 @@ export function buildValueAAD(
   namespace: string | undefined,
   name: string,
 ): Uint8Array {
-  return utf8Bytes(JSON.stringify(["value", ...buildAadParts(namespace, name)]));
+  return utf8Bytes(
+    JSON.stringify(["value", ...buildAadParts(namespace, name)]),
+  );
 }
 
 export function buildDekAAD(

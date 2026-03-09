@@ -2,7 +2,7 @@ import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import { components } from "./_generated/api.js";
 import { v } from "convex/values";
-import { SecretStore } from "@gaganref/convex-secret-store";
+import { SecretStore } from "convex-secret-store";
 
 const DEMO_KEYS = [
   { version: 2, value: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=" },
@@ -75,9 +75,8 @@ async function listAllConnections(
   ctx: Parameters<typeof secrets.list>[0],
   namespace: Namespace,
 ) {
-  const rows: Array<
-    Awaited<ReturnType<typeof secrets.list>>["page"][number]
-  > = [];
+  const rows: Array<Awaited<ReturnType<typeof secrets.list>>["page"][number]> =
+    [];
   let cursor: string | null = null;
 
   while (true) {
@@ -160,9 +159,18 @@ export const updateConnection = mutation({
       expiresAt: args.expiresAt,
       metadata: {
         provider: args.provider,
-        label: args.label === null ? undefined : args.label ?? loaded.metadata?.label,
-        owner: args.owner === null ? undefined : args.owner ?? loaded.metadata?.owner,
-        notes: args.notes === null ? undefined : args.notes ?? loaded.metadata?.notes,
+        label:
+          args.label === null
+            ? undefined
+            : (args.label ?? loaded.metadata?.label),
+        owner:
+          args.owner === null
+            ? undefined
+            : (args.owner ?? loaded.metadata?.owner),
+        notes:
+          args.notes === null
+            ? undefined
+            : (args.notes ?? loaded.metadata?.notes),
       },
     });
   },

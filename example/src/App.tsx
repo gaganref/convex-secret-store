@@ -25,7 +25,11 @@ const MaintenancePage = lazy(async () => {
 
 function RouteFallback() {
   return (
-    <div className="flex min-h-72 items-center justify-center" role="status" aria-live="polite">
+    <div
+      className="flex min-h-72 items-center justify-center"
+      role="status"
+      aria-live="polite"
+    >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Spinner />
         <span>Loading page</span>
@@ -49,9 +53,13 @@ function AppContent() {
   if (page === "usage") {
     pageContent = <UsagePage workspace={workspace} environment={environment} />;
   } else if (page === "activity") {
-    pageContent = <ActivityPage workspace={workspace} environment={environment} />;
+    pageContent = (
+      <ActivityPage workspace={workspace} environment={environment} />
+    );
   } else if (page === "maintenance") {
-    pageContent = <MaintenancePage workspace={workspace} environment={environment} />;
+    pageContent = (
+      <MaintenancePage workspace={workspace} environment={environment} />
+    );
   }
 
   return (

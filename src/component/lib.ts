@@ -270,8 +270,11 @@ export const put = mutation({
       };
     }
 
-    const { _id: _existingId, _creationTime: _existingCreatedAt, ...stored } =
-      existing;
+    const {
+      _id: _existingId,
+      _creationTime: _existingCreatedAt,
+      ...stored
+    } = existing;
     const replacement: SecretReplacement = {
       ...stored,
       namespace: args.namespace,
@@ -403,8 +406,11 @@ export const update = mutation({
       return { updated: false };
     }
 
-    const { _id: _secretId, _creationTime: _secretCreatedAt, ...stored } =
-      secret;
+    const {
+      _id: _secretId,
+      _creationTime: _secretCreatedAt,
+      ...stored
+    } = secret;
     const replacement: SecretReplacement = {
       ...stored,
       updatedAt: Date.now(),
@@ -634,7 +640,9 @@ export const cleanup = mutation({
     const now = Date.now();
     const expiredSecrets = await ctx.db
       .query("secrets")
-      .withIndex("by_expires_at", (q) => q.gte("expiresAt", 0).lt("expiresAt", now))
+      .withIndex("by_expires_at", (q) =>
+        q.gte("expiresAt", 0).lt("expiresAt", now),
+      )
       .take(args.batchSize);
 
     for (const secret of expiredSecrets) {
@@ -661,7 +669,8 @@ export const cleanup = mutation({
       deletedSecrets: expiredSecrets.length,
       deletedEvents: oldEvents.length,
       isDone:
-        expiredSecrets.length < args.batchSize && oldEvents.length < args.batchSize,
+        expiredSecrets.length < args.batchSize &&
+        oldEvents.length < args.batchSize,
     };
   },
 });

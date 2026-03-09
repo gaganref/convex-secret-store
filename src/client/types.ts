@@ -10,7 +10,9 @@ import type { ComponentApi } from "../component/_generated/component.js";
 type PutMutationResult = FunctionReturnType<ComponentApi["lib"]["put"]>;
 type GetQueryResult = FunctionReturnType<ComponentApi["lib"]["get"]>;
 type ListQueryResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
-type ListEventsQueryResult = FunctionReturnType<ComponentApi["lib"]["listEvents"]>;
+type ListEventsQueryResult = FunctionReturnType<
+  ComponentApi["lib"]["listEvents"]
+>;
 type CleanupMutationResult = FunctionReturnType<ComponentApi["lib"]["cleanup"]>;
 
 export type SecretStoreTypeOptions = {
@@ -24,11 +26,12 @@ type NamespaceArg<TOptions extends SecretStoreTypeOptions> = TOptions extends {
   ? { namespace: N }
   : { namespace?: never };
 
-type NamespaceOutput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  namespace: infer N extends string;
-}
-  ? N | undefined
-  : undefined;
+type NamespaceOutput<TOptions extends SecretStoreTypeOptions> =
+  TOptions extends {
+    namespace: infer N extends string;
+  }
+    ? N | undefined
+    : undefined;
 
 type MetadataInput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
   metadata: infer M extends Record<string, unknown>;
@@ -36,11 +39,12 @@ type MetadataInput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
   ? M
   : Record<string, unknown>;
 
-type MetadataOutput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  metadata: infer M extends Record<string, unknown>;
-}
-  ? M | undefined
-  : Record<string, unknown> | undefined;
+type MetadataOutput<TOptions extends SecretStoreTypeOptions> =
+  TOptions extends {
+    metadata: infer M extends Record<string, unknown>;
+  }
+    ? M | undefined
+    : Record<string, unknown> | undefined;
 
 type ListItemBase = ListQueryResult["page"][number];
 type EventItemBase = ListEventsQueryResult["page"][number];

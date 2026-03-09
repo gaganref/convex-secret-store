@@ -1,5 +1,5 @@
 {
-  "name": "@gaganref/convex-secret-store",
+  "name": "convex-secret-store",
   "description": "A secret store component for Convex.",
   "repository": "github:gaganref/convex-secret-store",
   "homepage": "https://github.com/gaganref/convex-secret-store#readme",
@@ -37,7 +37,7 @@
   },
   "files": [
     "dist",
-    "src"
+    "src/test.ts"
   ],
   "exports": {
     "./package.json": "./package.json",
@@ -82,6 +82,7 @@
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.3",
+    "@vitest/coverage-v8": "^4.0.18",
     "chokidar-cli": "3.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

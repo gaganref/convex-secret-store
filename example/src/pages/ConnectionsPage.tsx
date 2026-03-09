@@ -1,7 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
-import { formatAbsoluteTime, formatCountLabel, formatRelativeTime } from "@/lib/format";
+import {
+  formatAbsoluteTime,
+  formatCountLabel,
+  formatRelativeTime,
+} from "@/lib/format";
 import {
   Card,
   CardContent,
@@ -25,11 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Plus,
-  PencilSimple,
-  Trash,
-} from "@phosphor-icons/react";
+import { Plus, PencilSimple, Trash } from "@phosphor-icons/react";
 import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 import { SecurityExplainer } from "@/components/security-explainer";
@@ -86,8 +86,9 @@ const PROVIDERS: Array<{
   },
 ];
 
-type ConnectionRow =
-  NonNullable<ReturnType<typeof useQuery<typeof api.example.listConnections>>>["page"][number];
+type ConnectionRow = NonNullable<
+  ReturnType<typeof useQuery<typeof api.example.listConnections>>
+>["page"][number];
 
 export function ConnectionsPage({
   workspace,
@@ -121,7 +122,8 @@ export function ConnectionsPage({
 
   const configuredCount = connections?.page.length ?? 0;
   const expiredCount =
-    connections?.page.filter((row) => row.effectiveState === "expired").length ?? 0;
+    connections?.page.filter((row) => row.effectiveState === "expired")
+      .length ?? 0;
   const isSubmitting = submitState !== null;
   const missingCount = PROVIDERS.length - configuredCount;
 
@@ -178,7 +180,9 @@ export function ConnectionsPage({
       });
       setEditTarget(null);
     } catch (error) {
-      setSubmitError(getErrorMessage(error, "Could not update the connection."));
+      setSubmitError(
+        getErrorMessage(error, "Could not update the connection."),
+      );
     } finally {
       setSubmitState(null);
     }
@@ -189,10 +193,16 @@ export function ConnectionsPage({
     setSubmitState("Removing");
     setSubmitError(null);
     try {
-      await removeConnection({ workspace, environment, provider: deleteTarget });
+      await removeConnection({
+        workspace,
+        environment,
+        provider: deleteTarget,
+      });
       setDeleteTarget(null);
     } catch (error) {
-      setSubmitError(getErrorMessage(error, "Could not remove the connection."));
+      setSubmitError(
+        getErrorMessage(error, "Could not remove the connection."),
+      );
     } finally {
       setSubmitState(null);
     }
@@ -247,7 +257,7 @@ export function ConnectionsPage({
           <span className="text-xs">Loading connections</span>
         </div>
       ) : (
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {PROVIDERS.map((provider) => {
             const row = byName.get(provider.name);
             const isConfigured = row !== undefined;
@@ -306,7 +316,9 @@ export function ConnectionsPage({
                             Expires
                           </p>
                           <p className="mt-0.5 text-xs">
-                            {row.expiresAt ? formatAbsoluteTime(row.expiresAt) : "No expiry"}
+                            {row.expiresAt
+                              ? formatAbsoluteTime(row.expiresAt)
+                              : "No expiry"}
                           </p>
                         </div>
                         <div>
@@ -319,7 +331,9 @@ export function ConnectionsPage({
                       {(row.metadata?.label || row.metadata?.notes) && (
                         <div className="border-t pt-3 space-y-1">
                           {row.metadata?.label && (
-                            <p className="text-xs font-medium">{row.metadata.label}</p>
+                            <p className="text-xs font-medium">
+                              {row.metadata.label}
+                            </p>
                           )}
                           {row.metadata?.notes && (
                             <p className="text-xs text-muted-foreground">
@@ -332,8 +346,8 @@ export function ConnectionsPage({
                   ) : (
                     <div className="border-t pt-3">
                       <p className="text-xs text-muted-foreground">
-                        No secret stored for this provider in the current workspace
-                        and environment.
+                        No secret stored for this provider in the current
+                        workspace and environment.
                       </p>
                     </div>
                   )}
@@ -400,8 +414,8 @@ export function ConnectionsPage({
                 : ""}
             </DialogTitle>
             <DialogDescription>
-              Secret values are encrypted and never shown again after save. Advanced
-              details remain plaintext metadata.
+              Secret values are encrypted and never shown again after save.
+              Advanced details remain plaintext metadata.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -414,7 +428,13 @@ export function ConnectionsPage({
             <fieldset disabled={isSubmitting} className="contents">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="value">Secret value</Label>
-                <Textarea name="value" id="value" rows={3} required placeholder="Paste the credential" />
+                <Textarea
+                  name="value"
+                  id="value"
+                  rows={3}
+                  required
+                  placeholder="Paste the credential"
+                />
               </div>
               <details className="border border-border bg-muted/20 p-3">
                 <summary className="cursor-pointer text-xs font-medium">
@@ -426,7 +446,11 @@ export function ConnectionsPage({
                     <Input
                       name="label"
                       id="label"
-                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.label ?? "" : ""}
+                      defaultValue={
+                        composeProvider
+                          ? (byName.get(composeProvider)?.metadata?.label ?? "")
+                          : ""
+                      }
                       placeholder="Primary production token"
                     />
                   </div>
@@ -435,7 +459,11 @@ export function ConnectionsPage({
                     <Input
                       name="owner"
                       id="owner"
-                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.owner ?? "" : ""}
+                      defaultValue={
+                        composeProvider
+                          ? (byName.get(composeProvider)?.metadata?.owner ?? "")
+                          : ""
+                      }
                       placeholder="platform"
                     />
                   </div>
@@ -445,7 +473,11 @@ export function ConnectionsPage({
                       name="notes"
                       id="notes"
                       rows={2}
-                      defaultValue={composeProvider ? byName.get(composeProvider)?.metadata?.notes ?? "" : ""}
+                      defaultValue={
+                        composeProvider
+                          ? (byName.get(composeProvider)?.metadata?.notes ?? "")
+                          : ""
+                      }
                       placeholder="Optional plaintext context"
                     />
                   </div>
@@ -466,7 +498,11 @@ export function ConnectionsPage({
             <DialogFooter>
               <div className="mr-auto flex flex-col gap-1">
                 {submitState && (
-                  <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                  <span
+                    className="text-xs text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
                     {submitState}...
                   </span>
                 )}
@@ -477,7 +513,9 @@ export function ConnectionsPage({
                 )}
               </div>
               <Button type="submit" disabled={isSubmitting}>
-                {byName.has(composeProvider ?? "") ? "Replace secret" : "Save secret"}
+                {byName.has(composeProvider ?? "")
+                  ? "Replace secret"
+                  : "Save secret"}
               </Button>
             </DialogFooter>
           </form>
@@ -500,8 +538,8 @@ export function ConnectionsPage({
               {editTarget ? `Edit ${editTarget.name} details` : ""}
             </DialogTitle>
             <DialogDescription>
-              This only changes plaintext metadata and expiry. The encrypted secret
-              value stays untouched.
+              This only changes plaintext metadata and expiry. The encrypted
+              secret value stays untouched.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -514,15 +552,28 @@ export function ConnectionsPage({
             <fieldset disabled={isSubmitting} className="contents">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-label">Label</Label>
-                <Input name="label" id="edit-label" defaultValue={editTarget?.metadata?.label ?? ""} />
+                <Input
+                  name="label"
+                  id="edit-label"
+                  defaultValue={editTarget?.metadata?.label ?? ""}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-owner">Owner</Label>
-                <Input name="owner" id="edit-owner" defaultValue={editTarget?.metadata?.owner ?? ""} />
+                <Input
+                  name="owner"
+                  id="edit-owner"
+                  defaultValue={editTarget?.metadata?.owner ?? ""}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-notes">Notes</Label>
-                <Textarea name="notes" id="edit-notes" rows={3} defaultValue={editTarget?.metadata?.notes ?? ""} />
+                <Textarea
+                  name="notes"
+                  id="edit-notes"
+                  rows={3}
+                  defaultValue={editTarget?.metadata?.notes ?? ""}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="edit-expiresAt">Absolute expiry</Label>
@@ -532,7 +583,9 @@ export function ConnectionsPage({
                   type="datetime-local"
                   defaultValue={
                     editTarget?.expiresAt
-                      ? new Date(editTarget.expiresAt).toISOString().slice(0, 16)
+                      ? new Date(editTarget.expiresAt)
+                          .toISOString()
+                          .slice(0, 16)
                       : ""
                   }
                 />
@@ -541,7 +594,11 @@ export function ConnectionsPage({
             <DialogFooter>
               <div className="mr-auto flex flex-col gap-1">
                 {submitState && (
-                  <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                  <span
+                    className="text-xs text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
                     {submitState}...
                   </span>
                 )}
@@ -551,7 +608,9 @@ export function ConnectionsPage({
                   </span>
                 )}
               </div>
-              <Button type="submit" disabled={isSubmitting}>Save details</Button>
+              <Button type="submit" disabled={isSubmitting}>
+                Save details
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -571,8 +630,8 @@ export function ConnectionsPage({
           <DialogHeader>
             <DialogTitle>Remove {deleteTarget}</DialogTitle>
             <DialogDescription>
-              This removes the stored secret for this scope and writes a matching
-              deleted audit event.
+              This removes the stored secret for this scope and writes a
+              matching deleted audit event.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -583,10 +642,18 @@ export function ConnectionsPage({
                 </span>
               )}
             </div>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={isSubmitting}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()} disabled={isSubmitting}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={isSubmitting}
+            >
               {submitState ? "Removing..." : "Remove connection"}
             </Button>
           </DialogFooter>

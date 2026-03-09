@@ -129,6 +129,9 @@ describe("SecretStore client", () => {
   });
 
   test("rotateKeys does not report done when a stale row still remains on the old version", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-09T12:00:00.000Z"));
+
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
     const v1Client = new SecretStore<{
@@ -158,6 +161,7 @@ describe("SecretStore client", () => {
       runMutation: async (mutation, args) => {
         if (!injectedConcurrentUpdate) {
           injectedConcurrentUpdate = true;
+          vi.setSystemTime(new Date("2026-03-09T12:00:01.000Z"));
           await t.mutation(components.secretStore.lib.update, {
             name: "github",
             metadata: { owner: "rotated-later" },
@@ -188,9 +192,12 @@ describe("SecretStore client", () => {
   test("client rejects empty namespace", async () => {
     const t = initConvexTest();
     const { mutationCtx } = ctxFrom(t);
-    const client = new SecretStore<{ namespace: string }>(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const client = new SecretStore<{ namespace: string }>(
+      components.secretStore,
+      {
+        keys: [{ version: 1, value: KEY_V1 }],
+      },
+    );
 
     await expect(
       client.put(mutationCtx, {
@@ -294,9 +301,7 @@ test("client type contracts remain stable", () => {
     name: "openai",
     value: "sk",
   };
-  expectTypeOf(validNamespacedArgs.namespace).toEqualTypeOf<
-    `env:${string}`
-  >();
+  expectTypeOf(validNamespacedArgs.namespace).toEqualTypeOf<`env:${string}`>();
 
   // @ts-expect-error namespace is required when configured in the generic.
   const missingNamespace: NamespacedPutArgs = { name: "openai", value: "sk" };
@@ -315,7 +320,9 @@ test("client type contracts remain stable", () => {
   };
   void missingListNamespace;
 
-  type NamespacedListEventsArgs = Parameters<typeof _namespacedClient.listEvents>[1];
+  type NamespacedListEventsArgs = Parameters<
+    typeof _namespacedClient.listEvents
+  >[1];
   const validNamespacedListEventsArgs: NamespacedListEventsArgs = {
     namespace: "env:prod",
     paginationOpts: { numItems: 10, cursor: null },

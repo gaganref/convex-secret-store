@@ -1,93 +1,61 @@
-# Convex Component Template
-
-This is a Convex component, ready to be published on npm.
-
-To create your own component:
-
-1. Write code in src/component for your component. Component-specific tables,
-   queries, mutations, and actions go here.
-1. Write code in src/client for the Class that interfaces with the component.
-   This is the bridge your users will access to get information into and out of
-   your component
-1. Write example usage in example/convex/example.ts.
-1. Delete the text in this readme until `---` and flesh out the README.
-1. Publish to npm with `npm run alpha` or `npm run release`.
-
-To develop your component run a dev process in the example project:
-
-```sh
-npm i
-npm run dev
-```
-
-`npm i` will do the install and an initial build. `npm run dev` will start a
-file watcher to re-build the component, as well as the example project frontend
-and backend, which does codegen and installs the component.
-
-Modify the schema and index files in src/component/ to define your component.
-
-Write a client for using this component in src/client/index.ts.
-
-If you won't be adding frontend code (e.g. React components) to this component
-you can delete "./react" references in package.json and "src/react/" directory.
-If you will be adding frontend code, add a peer dependency on React in
-package.json.
-
-### Component Directory structure
-
-```
-.
-├── README.md           documentation of your component
-├── package.json        component name, version number, other metadata
-├── package-lock.json   Components are like libraries, package-lock.json
-│                       is .gitignored and ignored by consumers.
-├── src
-│   ├── component/
-│   │   ├── _generated/ Files here are generated for the component.
-│   │   ├── convex.config.ts  Name your component here and use other components
-│   │   ├── lib.ts    Define functions here and in new files in this directory
-│   │   └── schema.ts   schema specific to this component
-│   ├── client/
-│   │   └── index.ts    Code that needs to run in the app that uses the
-│   │                   component. Generally the app interacts directly with
-│   │                   the component's exposed API (src/component/*).
-│   └── react/          Code intended to be used on the frontend goes here.
-│       │               Your are free to delete this if this component
-│       │               does not provide code.
-│       └── index.ts
-├── example/            example Convex app that uses this component
-│   └── convex/
-│       ├── _generated/       Files here are generated for the example app.
-│       ├── convex.config.ts  Imports and uses this component
-│       ├── myFunctions.ts    Functions that use the component
-│       └── schema.ts         Example app schema
-└── dist/               Publishing artifacts will be created here.
-```
-
----
-
 # Convex Secret Store
 
-[![npm version](https://badge.fury.io/js/@example%2Fsecret-store.svg)](https://badge.fury.io/js/@example%2Fsecret-store)
+[![npm version](https://badge.fury.io/js/convex-secret-store.svg)](https://badge.fury.io/js/convex-secret-store)
 
 <!-- START: Include on https://convex.dev/components -->
 
-- [ ] What is some compelling syntax as a hook?
-- [ ] Why should you use this component?
-- [ ] Links to docs / other resources?
+A [Convex](https://convex.dev) component for encrypted secret storage with
+versioned key rotation, expiry, audit logging, and a typed server-side client.
+
+```ts
+const saved = await secrets.put(ctx, {
+  namespace: "acme:production",
+  name: "openai",
+  value: process.env.OPENAI_API_KEY!,
+  metadata: { owner: "platform" },
+});
+
+const loaded = await secrets.get(ctx, {
+  namespace: "acme:production",
+  name: "openai",
+});
+
+if (loaded.ok) {
+  // loaded.value -> plaintext in memory
+  // loaded.metadata -> plaintext metadata
+}
+```
+
+What this component gives you:
+
+- envelope encryption with a per-secret DEK and versioned KEKs
+- explicit key rotation without rewriting secret plaintext
+- expiry-aware reads and cleanup
+- append-only audit events for create, update, delete, and rotate operations
+- a typed `SecretStore` class for use in Convex queries, mutations, and actions
 
 Found a bug? Feature request?
 [File it here](https://github.com/gaganref/convex-secret-store/issues).
 
+## Pre-requisite: Convex
+
+You'll need an existing Convex project to use this component. Convex is a hosted
+backend platform, including a database, serverless functions, and the generated
+component wiring this package expects. If you haven't used Convex before, the
+[Convex tutorial](https://docs.convex.dev/get-started) is a good place to start.
+
 ## Installation
 
-Create a `convex.config.ts` file in your app's `convex/` folder and install the
-component by calling `use`:
+```sh
+npm install convex-secret-store
+```
+
+Install the component in your app's `convex.config.ts`:
 
 ```ts
 // convex/convex.config.ts
 import { defineApp } from "convex/server";
-import secretStore from "@gaganref/convex-secret-store/convex.config.js";
+import secretStore from "convex-secret-store/convex.config.js";
 
 const app = defineApp();
 app.use(secretStore);
@@ -95,52 +63,417 @@ app.use(secretStore);
 export default app;
 ```
 
-## Usage
+## Quick Start
+
+Create a shared `SecretStore` instance:
 
 ```ts
-import { components } from "./_generated/api";
+// convex/secrets.ts
+import { SecretStore } from "convex-secret-store";
+import { components } from "./_generated/api.js";
 
-export const addComment = mutation({
-  args: { text: v.string(), targetId: v.string() },
+export const secrets = new SecretStore<{
+  namespace: `${string}:${"production" | "testing"}`;
+  metadata: { owner?: string; label?: string; notes?: string };
+}>(components.secretStore, {
+  keys: [
+    { version: 2, value: process.env.SECRET_STORE_KEY_V2! },
+    { version: 1, value: process.env.SECRET_STORE_KEY_V1! },
+  ],
+});
+```
+
+Use it inside your Convex functions:
+
+```ts
+// convex/integrations.ts
+import { mutation, action } from "./_generated/server.js";
+import { v } from "convex/values";
+import { secrets } from "./secrets.js";
+
+export const putOpenAIKey = mutation({
+  args: {
+    workspace: v.string(),
+    value: v.string(),
+  },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(components.secretStore.lib.add, {
-      text: args.text,
-      targetId: args.targetId,
-      userId: await getAuthUserId(ctx),
+    return await secrets.put(ctx, {
+      namespace: `${args.workspace}:production`,
+      name: "openai",
+      value: args.value,
+      metadata: { owner: "platform" },
     });
+  },
+});
+
+export const callProvider = action({
+  args: { workspace: v.string() },
+  handler: async (ctx, args) => {
+    const secret = await secrets.get(ctx, {
+      namespace: `${args.workspace}:production`,
+      name: "openai",
+    });
+
+    if (!secret.ok) {
+      throw new Error(`Secret unavailable: ${secret.reason}`);
+    }
+
+    return {
+      authHeaderPreview: `Bearer ${secret.value.slice(0, 4)}...`,
+    };
   },
 });
 ```
 
-See more example usage in [example.ts](./example/convex/example.ts).
+## How It Works
 
-### HTTP Routes
+Each stored secret uses two encryption layers:
 
-You can register HTTP routes for the component to expose HTTP endpoints:
+- **DEK**: a fresh random data-encryption key generated per secret value
+- **KEK**: a longer-lived key-encryption key from your configured `keys`
 
-```ts
-import { httpRouter } from "convex/server";
-import { registerRoutes } from "@gaganref/convex-secret-store";
-import { components } from "./_generated/api";
+When you call `put`:
 
-const http = httpRouter();
+1. the plaintext value is encrypted with a fresh DEK
+2. that DEK is wrapped with the active KEK
+3. Convex stores:
+   - `encryptedValue`
+   - `iv`
+   - `wrappedDEK`
+   - `dekIv`
+   - `keyVersion`
 
-registerRoutes(http, components.secretStore, {
-  pathPrefix: "/comments",
-});
+When you call `get`:
 
-export default http;
+1. the row is loaded from Convex
+2. the stored `keyVersion` selects the correct KEK
+3. the DEK is unwrapped
+4. the secret value is decrypted in memory
+
+When you rotate keys:
+
+- the encrypted secret value does **not** change
+- only the wrapped DEK layer is re-encrypted under a newer KEK
+
+This is standard envelope-encryption behavior and keeps key rotation cheaper
+than full plaintext re-encryption.
+
+## Key Material
+
+`keys` must contain base64-encoded 32-byte AES keys.
+
+Generate one with:
+
+```sh
+openssl rand -base64 32
 ```
 
-This will expose a GET endpoint that returns the most recent comment as JSON.
-The endpoint requires a `targetId` query parameter. See
-[http.ts](./example/convex/http.ts) for a complete example.
+Rules:
 
-<!-- END: Include on https://convex.dev/components -->
+- the first entry is the active key used for new writes
+- later entries are decrypt-only keys used for old rows
+- versions must be unique non-negative integers
+- empty-string namespaces are rejected
 
-Run the example:
+## Typed Options
+
+The `SecretStore` class accepts a generic parameter for type-safe namespaces and
+metadata:
+
+```ts
+export const secrets = new SecretStore<{
+  namespace: `${string}:${"production" | "testing"}`;
+  metadata: {
+    owner?: string;
+    label?: string;
+    notes?: string;
+  };
+}>(components.secretStore, {
+  keys: [{ version: 1, value: process.env.SECRET_STORE_KEY_V1! }],
+  defaults: {
+    ttlMs: 30 * 24 * 60 * 60 * 1000,
+  },
+  logLevel: "warn",
+});
+```
+
+Type options:
+
+- `namespace` — any `string` subtype. When set, `namespace` becomes required on
+  normal read/write/list operations.
+- `metadata` — shape of the plaintext metadata object stored with each secret.
+
+> **Note:** These are compile-time type constraints only. Runtime storage is
+> still flexible:
+>
+> - `namespace` → `v.optional(v.string())`
+> - `metadata` → `v.optional(v.record(v.string(), v.any()))`
+>
+> Existing stored rows are not migrated if you later change your TypeScript
+> types.
+
+## Usage
+
+### Put
+
+Encrypt and store a secret value:
+
+```ts
+const result = await secrets.put(ctx, {
+  namespace: "acme:production",
+  name: "stripe",
+  value: "sk_live_...",
+  metadata: { owner: "billing" },
+  ttlMs: 90 * 24 * 60 * 60 * 1000,
+});
+```
+
+Notes:
+
+- `ttlMs` is converted to an absolute `expiresAt`
+- pass `metadata: null` only on overwrite if you want to remove metadata
+- values larger than 64 KiB are rejected
+
+### Get
+
+Load and decrypt a secret:
+
+```ts
+const result = await secrets.get(ctx, {
+  namespace: "acme:production",
+  name: "stripe",
+});
+```
+
+`get` returns:
+
+- `{ ok: true, value, metadata, expiresAt, updatedAt }`
+- `{ ok: false, reason: "not_found" | "expired" | "key_version_unavailable" }`
+
+`key_version_unavailable` means the row exists, but the runtime no longer has
+the KEK version needed to unwrap it.
+
+### Has
+
+Check whether a usable secret exists:
+
+```ts
+const exists = await secrets.has(ctx, {
+  namespace: "acme:production",
+  name: "stripe",
+});
+```
+
+Expired secrets return `false`.
+
+### Update
+
+Update plaintext metadata or expiry without rewriting the encrypted value:
+
+```ts
+await secrets.update(ctx, {
+  namespace: "acme:production",
+  name: "stripe",
+  metadata: { owner: "finance", label: "primary" },
+  expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+});
+```
+
+Pass `null` to clear metadata or expiry entirely.
+
+### Remove
+
+Delete a secret and append a matching audit event:
+
+```ts
+await secrets.remove(ctx, {
+  namespace: "acme:production",
+  name: "stripe",
+});
+```
+
+### List
+
+Paginate secrets in one namespace:
+
+```ts
+const page = await secrets.list(ctx, {
+  namespace: "acme:production",
+  order: "desc",
+  paginationOpts: { numItems: 20, cursor: null },
+});
+```
+
+Notes:
+
+- rows are ordered by `updatedAt`
+- expired rows are still listed
+- each row includes `effectiveState: "active" | "expired"`
+
+### List Events
+
+Paginate audit events:
+
+```ts
+const events = await secrets.listEvents(ctx, {
+  namespace: "acme:production",
+  paginationOpts: { numItems: 50, cursor: null },
+});
+```
+
+You can also filter by `name`, `type`, or by `secretId`.
+
+V1 restrictions:
+
+- `name` and `type` cannot be combined
+- when filtering by `name` or `type`, `namespace` is required
+- `secretId` cannot be combined with `namespace`, `name`, or `type`
+
+### Rotate Keys
+
+Rewrap old rows from one key version to the active version:
+
+```ts
+const result = await secrets.rotateKeys(ctx, {
+  fromVersion: 1,
+  batchSize: 100,
+  cursor: null,
+});
+```
+
+Result fields:
+
+- `fromVersion`
+- `toVersion`
+- `processed`
+- `rotated`
+- `skipped`
+- `isDone`
+- `continueCursor`
+
+Important semantics:
+
+- rotation rewraps DEKs only
+- the encrypted secret plaintext is not rewritten
+- concurrent writes are protected with compare-and-swap checks
+- stale rows are skipped safely and can be retried in a later batch
+- do not remove an old KEK until rotation is fully drained
+
+### Cleanup
+
+Run bounded cleanup for expired secrets and old audit events:
+
+```ts
+const result = await secrets.cleanup(ctx, {
+  retentionMs: 30 * 24 * 60 * 60 * 1000,
+  batchSize: 100,
+});
+```
+
+What cleanup does:
+
+- deletes expired secret rows
+- writes a `deleted` audit event with `deletedReason: "expired_cleanup"`
+- deletes audit rows older than `retentionMs`
+
+## Rotation Workflow
+
+Recommended flow:
+
+1. start with one key:
+
+```ts
+keys: [{ version: 1, value: process.env.SECRET_STORE_KEY_V1! }];
+```
+
+2. deploy a new active key first:
+
+```ts
+keys: [
+  { version: 2, value: process.env.SECRET_STORE_KEY_V2! },
+  { version: 1, value: process.env.SECRET_STORE_KEY_V1! },
+];
+```
+
+3. new writes use version `2`
+4. old rows on version `1` still decrypt
+5. run `rotateKeys({ fromVersion: 1 })` until `isDone === true`
+6. deploy again with version `1` removed
+
+This component does not use explicit locks during rotation. Instead, it uses
+optimistic concurrency checks so concurrent writes do not corrupt rows. If a row
+changes while rotation is in flight, the rewrap attempt is skipped and can be
+retried later.
+
+## Security Model
+
+- **Envelope encryption** — each secret gets its own random DEK, wrapped by a
+  configured KEK.
+- **Exact key version lookup** — reads use the stored `keyVersion`; they do not
+  probe multiple keys.
+- **AAD binding** — ciphertext is bound to `namespace`, `name`, and
+  `keyVersion`, so moving ciphertext between rows should fail authentication.
+- **No backend KEKs** — the Convex component stores ciphertext only. KEKs live
+  in the host app runtime using the `SecretStore` client.
+- **Plaintext metadata** — `metadata`, `namespace`, `name`, expiry, and audit
+  metadata are not encrypted.
+
+Important limitations:
+
+- this protects secrets at rest in Convex, not against a compromised app runtime
+- any code with access to your configured KEKs can decrypt secrets
+- plaintext exists in memory while your server-side code uses it
+- do not store sensitive data in metadata fields
+
+## Configuration Options
+
+Pass options when constructing the client:
+
+```ts
+new SecretStore(components.secretStore, {
+  keys: [{ version: 1, value: process.env.SECRET_STORE_KEY_V1! }],
+  defaults: {
+    ttlMs: null,
+  },
+  logLevel: "warn",
+});
+```
+
+Options:
+
+- `keys` — required versioned KEKs
+- `defaults.ttlMs` — default secret TTL in milliseconds
+- `logLevel` — `"debug" | "warn" | "error" | "none"`
+
+## Example App
+
+See the [example/](./example) directory for a full reference app called
+**Integration Vault**.
+
+It demonstrates:
+
+- `Connections` — store, replace, edit, and remove provider secrets
+- `Usage` — safe server-side secret consumption without plaintext browser reveal
+- `Activity` — audit history
+- `Advanced` — key rotation and cleanup flows
+
+> **Security note:** The example app keeps secret management intentionally
+> simple. In a real app, gate secret write/read flows behind your authentication
+> and authorization layer before exposing them to operators.
+
+## Development
 
 ```sh
 npm i
 npm run dev
 ```
+
+Useful commands:
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+```
+
+<!-- END: Include on https://convex.dev/components -->

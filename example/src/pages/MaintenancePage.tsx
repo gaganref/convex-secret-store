@@ -18,11 +18,7 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@/components/ui/empty";
-import {
-  ArrowsClockwise,
-  Broom,
-  Plant,
-} from "@phosphor-icons/react";
+import { ArrowsClockwise, Broom, Plant } from "@phosphor-icons/react";
 import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -42,14 +38,19 @@ export function MaintenancePage({
   const runCleanup = useMutation(api.example.runCleanup);
 
   const [operationState, setOperationState] = useState<string | null>(null);
-  const [rotationResult, setRotationResult] =
-    useState<Awaited<ReturnType<typeof runRotationBatch>> | null>(null);
-  const [cleanupResult, setCleanupResult] =
-    useState<Awaited<ReturnType<typeof runCleanup>> | null>(null);
+  const [rotationResult, setRotationResult] = useState<Awaited<
+    ReturnType<typeof runRotationBatch>
+  > | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<Awaited<
+    ReturnType<typeof runCleanup>
+  > | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const legacyCount = useMemo(() => {
-    return snapshot?.versionCounts.find((entry) => entry.keyVersion === 1)?.count ?? 0;
+    return (
+      snapshot?.versionCounts.find((entry) => entry.keyVersion === 1)?.count ??
+      0
+    );
   }, [snapshot]);
   const isOperating = operationState !== null;
 
@@ -64,7 +65,9 @@ export function MaintenancePage({
         value: "ghp_demo_legacy_token",
       });
     } catch (error) {
-      setOperationError(getErrorMessage(error, "Could not seed the legacy connection."));
+      setOperationError(
+        getErrorMessage(error, "Could not seed the legacy connection."),
+      );
     } finally {
       setOperationState(null);
     }
@@ -81,7 +84,9 @@ export function MaintenancePage({
       });
       setRotationResult(result);
     } catch (error) {
-      setOperationError(getErrorMessage(error, "Could not run the rotation batch."));
+      setOperationError(
+        getErrorMessage(error, "Could not run the rotation batch."),
+      );
     } finally {
       setOperationState(null);
     }
@@ -115,9 +120,9 @@ export function MaintenancePage({
             Rotation and cleanup without touching plaintext
           </h2>
           <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-            These are secondary reference operations. The selected workspace is used
-            for the snapshot and demo seed flow; rotation and cleanup still run
-            across the component store.
+            These are secondary reference operations. The selected workspace is
+            used for the snapshot and demo seed flow; rotation and cleanup still
+            run across the component store.
           </p>
         </div>
       </div>
@@ -145,7 +150,9 @@ export function MaintenancePage({
                 ? formatCountLabel(legacyCount, "legacy row")
                 : "No legacy rows"}
             </Badge>
-            <Badge variant={snapshot.expiredSecrets > 0 ? "destructive" : "outline"}>
+            <Badge
+              variant={snapshot.expiredSecrets > 0 ? "destructive" : "outline"}
+            >
               {snapshot.expiredSecrets > 0
                 ? formatCountLabel(snapshot.expiredSecrets, "expired secret")
                 : "No expired secrets"}
@@ -166,11 +173,14 @@ export function MaintenancePage({
                 {snapshot.configuredVersions.map((version) => (
                   <Badge
                     key={version}
-                    variant={version === snapshot.activeVersion ? "default" : "outline"}
+                    variant={
+                      version === snapshot.activeVersion ? "default" : "outline"
+                    }
                   >
                     v{version} ·{" "}
-                    {snapshot.versionCounts.find((entry) => entry.keyVersion === version)?.count ??
-                      0}{" "}
+                    {snapshot.versionCounts.find(
+                      (entry) => entry.keyVersion === version,
+                    )?.count ?? 0}{" "}
                     rows
                   </Badge>
                 ))}
@@ -185,14 +195,16 @@ export function MaintenancePage({
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
                     Rotation
                   </p>
-                  <CardTitle className="mt-0.5">Move old key versions forward</CardTitle>
+                  <CardTitle className="mt-0.5">
+                    Move old key versions forward
+                  </CardTitle>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <CardDescription>
                   Rewrap DEKs from version 1 onto the active key version. The
-                  underlying secret plaintext is not rewritten, only the wrapping
-                  layer changes.
+                  underlying secret plaintext is not rewritten, only the
+                  wrapping layer changes.
                 </CardDescription>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -235,8 +247,12 @@ export function MaintenancePage({
                     <Badge variant="outline">
                       {rotationResult.skipped} skipped
                     </Badge>
-                    <Badge variant={rotationResult.isDone ? "default" : "outline"}>
-                      {rotationResult.isDone ? "Batch complete" : "More rows remain"}
+                    <Badge
+                      variant={rotationResult.isDone ? "default" : "outline"}
+                    >
+                      {rotationResult.isDone
+                        ? "Batch complete"
+                        : "More rows remain"}
                     </Badge>
                   </div>
                 )}
@@ -254,8 +270,8 @@ export function MaintenancePage({
               </CardHeader>
               <CardContent className="space-y-3">
                 <CardDescription>
-                  Sweep expired secrets in bounded batches. Each deletion writes a
-                  matching audit event first, so the removal stays visible in
+                  Sweep expired secrets in bounded batches. Each deletion writes
+                  a matching audit event first, so the removal stays visible in
                   Activity.
                 </CardDescription>
                 <div className="flex flex-wrap gap-2">
@@ -277,8 +293,12 @@ export function MaintenancePage({
                     <Badge variant="outline">
                       {cleanupResult.deletedEvents} events written
                     </Badge>
-                    <Badge variant={cleanupResult.isDone ? "default" : "outline"}>
-                      {cleanupResult.isDone ? "Batch complete" : "More rows remain"}
+                    <Badge
+                      variant={cleanupResult.isDone ? "default" : "outline"}
+                    >
+                      {cleanupResult.isDone
+                        ? "Batch complete"
+                        : "More rows remain"}
                     </Badge>
                   </div>
                 )}
@@ -291,7 +311,11 @@ export function MaintenancePage({
       {operationState && (
         <Card size="sm">
           <CardContent>
-            <div className="flex items-center gap-2 text-muted-foreground" role="status" aria-live="polite">
+            <div
+              className="flex items-center gap-2 text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
               <Spinner />
               <span className="text-xs">{operationState}...</span>
             </div>
@@ -314,8 +338,8 @@ export function MaintenancePage({
           <EmptyHeader>
             <EmptyTitle>No secrets stored yet</EmptyTitle>
             <EmptyDescription>
-              Add a provider secret on the Connections page, then come back to try
-              rotation or cleanup flows.
+              Add a provider secret on the Connections page, then come back to
+              try rotation or cleanup flows.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

@@ -111,6 +111,13 @@ export class SecretStore<
   public readonly options: NormalizedSecretStoreOptions;
   private readonly kekCache = new Map<number, Promise<CryptoKey>>();
 
+  /**
+   * Create a typed SecretStore client for a mounted component instance.
+   *
+   * `keys` must contain one or more versioned KEKs. The first entry is the
+   * active key used for new writes; later entries are decrypt-only keys used to
+   * read older rows and rotate them forward.
+   */
   constructor(component: ComponentApi, options: SecretStoreOptions<TOptions>) {
     this.component = component;
     this.options = normalizeSecretStoreOptions(
@@ -132,6 +139,14 @@ export class SecretStore<
     return imported;
   }
 
+  /**
+   * Encrypt and store a secret value.
+   *
+   * The plaintext is encrypted client-side with a fresh DEK, that DEK is wrapped
+   * with the active KEK, and only ciphertext fields are persisted in Convex.
+   * When a secret with the same `namespace + name` already exists, the row is
+   * replaced in place and an `updated` audit event is written.
+   */
   async put(ctx: RunMutationCtx, args: PutArgs<TOptions>): Promise<PutResult> {
     const now = Date.now();
     const namespace = readNamespace(args);
@@ -174,7 +189,17 @@ export class SecretStore<
     }
   }
 
-  async get(ctx: RunQueryCtx, args: GetArgs<TOptions>): Promise<GetResult<TOptions>> {
+  /**
+   * Load and decrypt a secret value.
+   *
+   * Returns `not_found` or `expired` when the backend row is unavailable for
+   * use. Returns `key_version_unavailable` when the row exists but the current
+   * runtime is missing the KEK version required to unwrap it.
+   */
+  async get(
+    ctx: RunQueryCtx,
+    args: GetArgs<TOptions>,
+  ): Promise<GetResult<TOptions>> {
     const namespace = readNamespace(args);
 
     try {
@@ -220,6 +245,11 @@ export class SecretStore<
     }
   }
 
+  /**
+   * Check whether a usable secret exists.
+   *
+   * This is an expiry-aware existence check: expired rows return `false`.
+   */
   async has(ctx: RunQueryCtx, args: HasArgs<TOptions>): Promise<boolean> {
     try {
       return await ctx.runQuery(this.component.lib.has, {
@@ -246,6 +276,11 @@ export class SecretStore<
     }
   }
 
+  /**
+   * Update plaintext metadata or expiry without rewriting encrypted value bytes.
+   *
+   * Pass `null` for `metadata` or `expiresAt` to remove those fields entirely.
+   */
   async update(
     ctx: RunMutationCtx,
     args: UpdateArgs<TOptions>,
@@ -264,7 +299,16 @@ export class SecretStore<
     }
   }
 
-  async list(ctx: RunQueryCtx, args: ListArgs<TOptions>): Promise<ListResult<TOptions>> {
+  /**
+   * List secrets in one namespace.
+   *
+   * Results are ordered by `updatedAt` and include `effectiveState` so callers
+   * can distinguish active and expired rows without additional filtering.
+   */
+  async list(
+    ctx: RunQueryCtx,
+    args: ListArgs<TOptions>,
+  ): Promise<ListResult<TOptions>> {
     try {
       return (await ctx.runQuery(this.component.lib.list, {
         namespace: readNamespace(args),
@@ -277,12 +321,21 @@ export class SecretStore<
     }
   }
 
+  /**
+   * List audit events for a namespace or one specific secret.
+   *
+   * In V1, `name` and `type` cannot be combined in the same query. When using a
+   * namespaced client, normal event listing requires `namespace`; the only
+   * namespace-less variant is a direct `secretId` lookup.
+   */
   async listEvents(
     ctx: RunQueryCtx,
     args: ListEventsArgs<TOptions>,
   ): Promise<ListEventsResult<TOptions>> {
     if (args.name !== undefined && args.type !== undefined) {
-      throw invalidArgumentError("listEvents does not support name + type in V1");
+      throw invalidArgumentError(
+        "listEvents does not support name + type in V1",
+      );
     }
 
     try {
@@ -299,6 +352,14 @@ export class SecretStore<
     }
   }
 
+  /**
+   * Rewrap rows from one KEK version onto the active KEK version.
+   *
+   * This operation does not rewrite encrypted secret plaintext. It only unwraps
+   * each row's stored DEK with `fromVersion` and rewraps that DEK with the
+   * active version. Concurrent writes are protected with compare-and-swap checks;
+   * stale rows are skipped safely and can be retried in later batches.
+   */
   async rotateKeys(
     ctx: RunMutationCtx & RunQueryCtx,
     args: RotateKeysArgs,
@@ -313,7 +374,9 @@ export class SecretStore<
 
     const toVersion = this.options.activeVersion;
     if (args.fromVersion === toVersion) {
-      throw invalidArgumentError("fromVersion must differ from the active version");
+      throw invalidArgumentError(
+        "fromVersion must differ from the active version",
+      );
     }
     if (!this.options.keyVersions.has(args.fromVersion)) {
       throw keyVersionUnavailableError(args.fromVersion);
@@ -346,14 +409,17 @@ export class SecretStore<
           toKek,
         });
 
-        const result = await ctx.runMutation(this.component.lib.updateWrappedDEK, {
-          secretId: row.secretId,
-          expectedKeyVersion: row.keyVersion,
-          expectedUpdatedAt: row.updatedAt,
-          keyVersion: toVersion,
-          wrappedDEK: nextWrapped.wrappedDEK,
-          dekIv: nextWrapped.dekIv,
-        });
+        const result = await ctx.runMutation(
+          this.component.lib.updateWrappedDEK,
+          {
+            secretId: row.secretId,
+            expectedKeyVersion: row.keyVersion,
+            expectedUpdatedAt: row.updatedAt,
+            keyVersion: toVersion,
+            wrappedDEK: nextWrapped.wrappedDEK,
+            dekIv: nextWrapped.dekIv,
+          },
+        );
 
         if (result.ok) {
           rotated += 1;
@@ -365,14 +431,17 @@ export class SecretStore<
       let isDone = page.isDone;
       let continueCursor: string | null = page.continueCursor;
       if (skipped > 0 && page.isDone) {
-        const remaining = await ctx.runQuery(this.component.lib.listByKeyVersion, {
-          fromVersion: args.fromVersion,
-          order: args.order,
-          paginationOpts: {
-            numItems: 1,
-            cursor: null,
+        const remaining = await ctx.runQuery(
+          this.component.lib.listByKeyVersion,
+          {
+            fromVersion: args.fromVersion,
+            order: args.order,
+            paginationOpts: {
+              numItems: 1,
+              cursor: null,
+            },
           },
-        });
+        );
         if (remaining.page.length > 0) {
           isDone = false;
           continueCursor = null;
@@ -393,6 +462,12 @@ export class SecretStore<
     }
   }
 
+  /**
+   * Delete expired secrets and old audit rows in bounded batches.
+   *
+   * Expired secret deletion writes matching `deleted` audit events with
+   * `deletedReason: "expired_cleanup"` before removing the secret row.
+   */
   async cleanup(
     ctx: RunMutationCtx,
     args: CleanupArgs = {},
@@ -401,7 +476,9 @@ export class SecretStore<
     const batchSize = args.batchSize ?? DEFAULT_CLEANUP_BATCH_SIZE;
 
     if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
-      throw invalidArgumentError("retentionMs must be a positive finite number");
+      throw invalidArgumentError(
+        "retentionMs must be a positive finite number",
+      );
     }
     if (!Number.isInteger(batchSize) || batchSize <= 0) {
       throw invalidArgumentError("batchSize must be a positive integer");

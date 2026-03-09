@@ -14,7 +14,10 @@ export function formatAbsoluteTime(
   }).format(value);
 }
 
-export function formatRelativeTime(value: number | undefined, now = Date.now()) {
+export function formatRelativeTime(
+  value: number | undefined,
+  now = Date.now(),
+) {
   if (value === undefined) {
     return "Never";
   }
@@ -34,7 +37,11 @@ export function formatRelativeTime(value: number | undefined, now = Date.now()) 
   return deltaMs >= 0 ? `in ${absDays}d` : `${absDays}d ago`;
 }
 
-export function formatCountLabel(count: number, singular: string, plural?: string) {
+export function formatCountLabel(
+  count: number,
+  singular: string,
+  plural?: string,
+) {
   const resolvedPlural = plural ?? `${singular}s`;
   return `${count} ${count === 1 ? singular : resolvedPlural}`;
 }

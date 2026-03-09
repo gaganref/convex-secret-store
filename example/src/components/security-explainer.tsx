@@ -18,19 +18,23 @@ const COPY = {
     items: [
       {
         label: "Secret value",
-        detail: "Encrypted at rest, write-only in this UI, and never shown again after save.",
+        detail:
+          "Encrypted at rest, write-only in this UI, and never shown again after save.",
       },
       {
         label: "Metadata",
-        detail: "Owner, label, and notes stay in plaintext. Do not put sensitive data there.",
+        detail:
+          "Owner, label, and notes stay in plaintext. Do not put sensitive data there.",
       },
       {
         label: "Expiry",
-        detail: "Expired rows are blocked from normal use and can be cleaned up later in batches.",
+        detail:
+          "Expired rows are blocked from normal use and can be cleaned up later in batches.",
       },
       {
         label: "Rotation",
-        detail: "Rotation rewraps key material only. It does not rewrite the secret plaintext.",
+        detail:
+          "Rotation rewraps key material only. It does not rewrite the secret plaintext.",
       },
     ],
   },
@@ -41,19 +45,23 @@ const COPY = {
     items: [
       {
         label: "Server load",
-        detail: "The secret is resolved inside Convex actions or queries, not in the client app.",
+        detail:
+          "The secret is resolved inside Convex actions or queries, not in the client app.",
       },
       {
         label: "Response shape",
-        detail: "Return masked previews, status, or downstream API results instead of plaintext.",
+        detail:
+          "Return masked previews, status, or downstream API results instead of plaintext.",
       },
       {
         label: "Metadata",
-        detail: "Ownership and labels can be returned because they are metadata, not encrypted value bytes.",
+        detail:
+          "Ownership and labels can be returned because they are metadata, not encrypted value bytes.",
       },
       {
         label: "Client role",
-        detail: "The browser chooses intent; the server owns secret use, expiry checks, and error handling.",
+        detail:
+          "The browser chooses intent; the server owns secret use, expiry checks, and error handling.",
       },
     ],
   },
@@ -76,7 +84,10 @@ export function SecurityExplainer({ mode }: SecurityExplainerProps) {
         <CardDescription>{copy.description}</CardDescription>
         <div className="grid gap-3 md:grid-cols-2">
           {copy.items.map((item) => (
-            <div key={item.label} className="border border-border bg-muted/20 p-3">
+            <div
+              key={item.label}
+              className="border border-border bg-muted/20 p-3"
+            >
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
                 {item.label}
               </p>

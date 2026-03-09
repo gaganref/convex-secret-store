@@ -1,9 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import {
-  metadataValidator,
-  secretEventTypeValidator,
-} from "../shared.js";
+import { metadataValidator, secretEventTypeValidator } from "../shared.js";
 
 export const secretsFields = {
   namespace: v.optional(v.string()),

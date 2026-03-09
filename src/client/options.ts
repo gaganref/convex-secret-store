@@ -83,10 +83,14 @@ export function normalizeSecretStoreOptions(
   const seen = new Set<number>();
   const keys = options.keys.map((entry, index) => {
     if (!Number.isInteger(entry.version) || entry.version < 0) {
-      throw optionsError(`keys[${index}].version must be a non-negative integer`);
+      throw optionsError(
+        `keys[${index}].version must be a non-negative integer`,
+      );
     }
     if (seen.has(entry.version)) {
-      throw optionsError(`keys[${index}].version ${entry.version} is duplicated`);
+      throw optionsError(
+        `keys[${index}].version ${entry.version} is duplicated`,
+      );
     }
     seen.add(entry.version);
 

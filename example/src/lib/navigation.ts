@@ -113,7 +113,9 @@ export function useAppRoute() {
     setWorkspace: (workspace: string) =>
       updateRoute({
         workspace:
-          workspace.trim().length > 0 ? workspace.trim() : DEFAULT_ROUTE.workspace,
+          workspace.trim().length > 0
+            ? workspace.trim()
+            : DEFAULT_ROUTE.workspace,
       }),
   };
 }

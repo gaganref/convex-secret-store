@@ -1,11 +1,12 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
-import { formatAbsoluteTime, formatCountLabel, formatRelativeTime } from "@/lib/format";
 import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+  formatAbsoluteTime,
+  formatCountLabel,
+  formatRelativeTime,
+} from "@/lib/format";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,13 @@ import {
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { type Environment } from "@/lib/navigation";
 
-const EVENT_FILTERS = ["all", "created", "updated", "rotated", "deleted"] as const;
+const EVENT_FILTERS = [
+  "all",
+  "created",
+  "updated",
+  "rotated",
+  "deleted",
+] as const;
 type EventFilter = (typeof EVENT_FILTERS)[number];
 
 export function ActivityPage({
@@ -43,7 +50,11 @@ export function ActivityPage({
     return rows.filter((event) => {
       if (typeFilter !== "all" && event.type !== typeFilter) return false;
       if (deferredSearch.length === 0) return true;
-      const haystack = [event.name, event.type, JSON.stringify(event.metadata ?? {})]
+      const haystack = [
+        event.name,
+        event.type,
+        JSON.stringify(event.metadata ?? {}),
+      ]
         .join(" ")
         .toLowerCase();
       return haystack.includes(deferredSearch);
@@ -91,15 +102,20 @@ export function ActivityPage({
             Audit trail for {workspace}
           </h2>
           <p className="mt-2 text-xs text-muted-foreground">
-            Every write path appends audit records here, including cleanup-driven
-            deletions and key rotation batches for the selected scope.
+            Every write path appends audit records here, including
+            cleanup-driven deletions and key rotation batches for the selected
+            scope.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline">{visibleLabel}</Badge>
-          <Badge variant="outline">{typeFilter === "all" ? "All types" : typeFilter}</Badge>
           <Badge variant="outline">
-            {latestEvent ? `Latest ${formatRelativeTime(latestEvent.createdAt)}` : "No activity yet"}
+            {typeFilter === "all" ? "All types" : typeFilter}
+          </Badge>
+          <Badge variant="outline">
+            {latestEvent
+              ? `Latest ${formatRelativeTime(latestEvent.createdAt)}`
+              : "No activity yet"}
           </Badge>
         </div>
       </div>
@@ -108,7 +124,10 @@ export function ActivityPage({
         <CardContent>
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <div className="relative flex-1 min-w-48">
-              <MagnifyingGlass size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <MagnifyingGlass
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -148,8 +167,8 @@ export function ActivityPage({
           <EmptyHeader>
             <EmptyTitle>No matching events</EmptyTitle>
             <EmptyDescription>
-              Broaden the filter or create a connection to start the audit trail for
-              this scope.
+              Broaden the filter or create a connection to start the audit trail
+              for this scope.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -172,20 +191,20 @@ export function ActivityPage({
               <div className="min-w-0 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-medium">{event.name}</p>
-                  <Badge variant={badgeVariant(event.type)}>
-                    {event.type}
-                  </Badge>
+                  <Badge variant={badgeVariant(event.type)}>{event.type}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {describeEvent(event)}
                 </p>
                 {Object.keys(event.metadata ?? {}).length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {Object.entries(event.metadata ?? {}).map(([key, value]) => (
-                      <Badge key={key} variant="outline">
-                        {key}: {String(value)}
-                      </Badge>
-                    ))}
+                    {Object.entries(event.metadata ?? {}).map(
+                      ([key, value]) => (
+                        <Badge key={key} variant="outline">
+                          {key}: {String(value)}
+                        </Badge>
+                      ),
+                    )}
                   </div>
                 )}
               </div>

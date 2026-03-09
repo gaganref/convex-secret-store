@@ -1,5 +1,5 @@
 import { defineApp } from "convex/server";
-import secretStore from "@gaganref/convex-secret-store/convex.config.js";
+import secretStore from "convex-secret-store/convex.config.js";
 
 const app = defineApp();
 app.use(secretStore);

@@ -13,7 +13,12 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { SecurityExplainer } from "@/components/security-explainer";
 
@@ -48,10 +53,13 @@ export function UsagePage({
   });
 
   const configuredConnections = (connections?.page ?? []).filter(
-    (row) => row.effectiveState === "active" || row.effectiveState === "expired",
+    (row) =>
+      row.effectiveState === "active" || row.effectiveState === "expired",
   );
 
-  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(
+    null,
+  );
   const activeSelectedProvider = configuredConnections.some(
     (row) => row.name === selectedProvider,
   )
@@ -79,8 +87,9 @@ export function UsagePage({
           Safe server-side consumption for {workspace}
         </h2>
         <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-          This tab shows the reference boundary: a client requests intent, then a
-          server wrapper consumes the stored secret and returns only safe output.
+          This tab shows the reference boundary: a client requests intent, then
+          a server wrapper consumes the stored secret and returns only safe
+          output.
         </p>
       </div>
 
@@ -100,8 +109,8 @@ export function UsagePage({
           <EmptyHeader>
             <EmptyTitle>No configured providers yet</EmptyTitle>
             <EmptyDescription>
-              Add a provider secret on the Connections page, then come back here to
-              inspect the server-side usage pattern.
+              Add a provider secret on the Connections page, then come back here
+              to inspect the server-side usage pattern.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -112,7 +121,9 @@ export function UsagePage({
               <Button
                 key={row.name}
                 size="xs"
-                variant={activeSelectedProvider === row.name ? "default" : "ghost"}
+                variant={
+                  activeSelectedProvider === row.name ? "default" : "ghost"
+                }
                 onClick={() => setSelectedProvider(row.name as Provider)}
               >
                 {PROVIDER_LABELS[row.name as Provider]}
@@ -184,7 +195,9 @@ export function UsagePage({
                         Returned to browser
                       </p>
                       <p className="mt-1 text-xs">
-                        {usagePreview.networkSafe ? "Masked data only" : "Not safe"}
+                        {usagePreview.networkSafe
+                          ? "Masked data only"
+                          : "Not safe"}
                       </p>
                     </div>
                     <div>
@@ -219,9 +232,9 @@ export function UsagePage({
                 </div>
 
                 <div className="border-t pt-3 text-xs text-muted-foreground">
-                  Demo behavior: this page returns a masked preview so you can inspect
-                  the boundary. A real app would usually return provider results,
-                  signed payloads, or status only.
+                  Demo behavior: this page returns a masked preview so you can
+                  inspect the boundary. A real app would usually return provider
+                  results, signed payloads, or status only.
                 </div>
               </CardContent>
             </Card>

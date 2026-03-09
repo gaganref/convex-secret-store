@@ -49,5 +49,5 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
-  secretStore: import("@gaganref/convex-secret-store/_generated/component.js").ComponentApi<"secretStore">;
+  secretStore: import("convex-secret-store/_generated/component.js").ComponentApi<"secretStore">;
 };
