@@ -1,6 +1,7 @@
 # Convex Secret Store
 
 [![npm version](https://badge.fury.io/js/convex-secret-store.svg)](https://badge.fury.io/js/convex-secret-store)
+[![Convex Component](https://www.convex.dev/components/badge/convex-secret-store)](https://www.convex.dev/components/convex-secret-store)
 
 <!-- START: Include on https://convex.dev/components -->
 
