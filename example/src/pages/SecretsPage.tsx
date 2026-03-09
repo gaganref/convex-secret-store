@@ -22,7 +22,7 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@/components/ui/empty";
-import { Plus, Trash, Eye } from "@phosphor-icons/react";
+import { ArrowsClockwise, Plus, Trash, Eye } from "@phosphor-icons/react";
 import { type Environment } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -46,18 +46,21 @@ export function SecretsPage({
   const putSecret = useMutation(api.example.putSecret);
   const removeSecret = useMutation(api.example.removeSecret);
 
+  const rows = result?.page;
   const [createOpen, setCreateOpen] = useState(false);
+  const [replaceTarget, setReplaceTarget] = useState<SecretRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<string | null>(null);
   const [submitState, setSubmitState] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const rows = result?.page ?? [];
   const stats = useMemo(() => {
-    const total = rows.length;
-    const expired = rows.filter((r) => r.effectiveState === "expired").length;
+    const page = rows ?? [];
+    const total = page.length;
+    const expired = page.filter((r) => r.effectiveState === "expired").length;
     return { total, expired, active: total - expired };
   }, [rows]);
+  const secretRows = rows ?? [];
 
   const isSubmitting = submitState !== null;
 
@@ -108,6 +111,39 @@ export function SecretsPage({
     }
   }
 
+  async function handleReplace(formData: FormData) {
+    if (!replaceTarget) return;
+
+    const value = String(formData.get("value") ?? "");
+    const ttlDaysRaw = String(formData.get("ttlDays") ?? "").trim();
+    const ttlDays = ttlDaysRaw.length === 0 ? undefined : Number(ttlDaysRaw);
+
+    if (ttlDays !== undefined && (!Number.isFinite(ttlDays) || ttlDays <= 0)) {
+      setSubmitError("Expiry must be a positive number of days.");
+      return;
+    }
+
+    setSubmitState("Replacing");
+    setSubmitError(null);
+    try {
+      await putSecret({
+        workspace,
+        environment,
+        name: replaceTarget.name,
+        value,
+        ttlMs:
+          ttlDays === undefined
+            ? undefined
+            : ttlDays * 24 * 60 * 60 * 1000,
+      });
+      setReplaceTarget(null);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "Could not replace the secret."));
+    } finally {
+      setSubmitState(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {/* Header */}
@@ -151,7 +187,7 @@ export function SecretsPage({
           <Spinner />
           <span className="text-xs">Loading secrets</span>
         </div>
-      ) : rows.length === 0 ? (
+      ) : secretRows.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No secrets yet</EmptyTitle>
@@ -171,10 +207,14 @@ export function SecretsPage({
             <span>Key</span>
             <span>Actions</span>
           </div>
-          {rows.map((row) => (
+          {secretRows.map((row) => (
             <SecretTableRow
               key={row.name}
               row={row}
+              onReplace={() => {
+                setSubmitError(null);
+                setReplaceTarget(row);
+              }}
               onDelete={() => {
                 setSubmitError(null);
                 setDeleteTarget(row.name);
@@ -274,6 +314,95 @@ export function SecretsPage({
         </DialogContent>
       </Dialog>
 
+      {/* Replace Dialog */}
+      <Dialog
+        open={replaceTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            setReplaceTarget(null);
+            setSubmitError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Replace <span className="font-mono">{replaceTarget?.name}</span>
+            </DialogTitle>
+            <DialogDescription>
+              Store a new value for this secret. Leave expiry blank to preserve
+              the current expiry.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleReplace(new FormData(e.currentTarget));
+            }}
+          >
+            <fieldset disabled={isSubmitting} className="contents">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="replaceName">Name</Label>
+                <Input
+                  id="replaceName"
+                  value={replaceTarget?.name ?? ""}
+                  readOnly
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="replaceValue">New value</Label>
+                <Textarea
+                  name="value"
+                  id="replaceValue"
+                  rows={3}
+                  required
+                  placeholder="Paste the replacement value"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="replaceTtlDays">
+                  Expire after days{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
+                <Input
+                  name="ttlDays"
+                  id="replaceTtlDays"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="Leave blank to preserve current expiry"
+                />
+              </div>
+            </fieldset>
+            <DialogFooter>
+              <div className="mr-auto flex flex-col gap-1">
+                {submitState && (
+                  <span
+                    className="text-xs text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {submitState}...
+                  </span>
+                )}
+                {submitError && (
+                  <span className="text-xs text-destructive" role="alert">
+                    {submitError}
+                  </span>
+                )}
+              </div>
+              <Button type="submit" disabled={isSubmitting}>
+                Replace secret
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Dialog */}
       <Dialog
         open={deleteTarget !== null}
@@ -332,11 +461,13 @@ export function SecretsPage({
 
 function SecretTableRow({
   row,
+  onReplace,
   onDelete,
   onPreview,
   disabled,
 }: {
   row: SecretRow;
+  onReplace: () => void;
   onDelete: () => void;
   onPreview: () => void;
   disabled: boolean;
@@ -359,6 +490,16 @@ function SecretTableRow({
       </p>
       <p className="text-xs text-muted-foreground">v{row.keyVersion}</p>
       <div className="flex gap-1">
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={onReplace}
+          disabled={disabled}
+          aria-label={`Replace ${row.name}`}
+        >
+          <ArrowsClockwise size={12} data-icon="inline-start" />
+          Replace
+        </Button>
         <Button
           size="icon"
           variant="ghost"

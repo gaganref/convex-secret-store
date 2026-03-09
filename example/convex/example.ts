@@ -4,6 +4,8 @@ import { components } from "./_generated/api.js";
 import { v } from "convex/values";
 import { SecretStore } from "convex-secret-store";
 
+// Demo-only fixed keys. Real apps should load KEKs from environment variables
+// or another secret-management system.
 const DEMO_KEYS = [
   { version: 2, value: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=" },
   { version: 1, value: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=" },
@@ -58,7 +60,6 @@ export const putSecret = mutation({
     name: v.string(),
     value: v.string(),
     ttlMs: v.optional(v.union(v.number(), v.null())),
-    metadata: v.optional(v.union(v.object({}), v.null())),
   },
   returns: {
     secretId: v.string(),
@@ -73,7 +74,6 @@ export const putSecret = mutation({
       name: args.name,
       value: args.value,
       ttlMs: args.ttlMs,
-      metadata: args.metadata === null ? null : undefined,
     });
   },
 });
@@ -108,7 +108,8 @@ export const listSecrets = query({
 });
 
 // ---------------------------------------------------------------------------
-// Server-side preview (row action)
+// Server-side preview (row action). This uses a query for a reactive demo UI;
+// production integrations would usually do similar work inside an action.
 // ---------------------------------------------------------------------------
 
 export const previewSecret = query({

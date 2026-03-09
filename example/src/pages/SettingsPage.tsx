@@ -98,9 +98,15 @@ export function SettingsPage({
         <p className="text-xs text-muted-foreground uppercase tracking-widest">
           Settings
         </p>
-        <h2 className="text-sm font-medium mt-1">
-          {workspace} / {environment}
-        </h2>
+        <h2 className="text-sm font-medium mt-1">Store-wide maintenance</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Rotation and cleanup affect the mounted secret store across all
+          workspaces and environments. Only demo seeding below is scoped to{" "}
+          <span className="font-mono">
+            {workspace} / {environment}
+          </span>
+          .
+        </p>
       </div>
 
       {snapshot === undefined ? (
@@ -119,9 +125,9 @@ export function SettingsPage({
             <CardHeader>
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                  Encryption
+                  Current scope
                 </p>
-                <CardTitle className="mt-0.5">Key versions</CardTitle>
+                <CardTitle className="mt-0.5">Version summary</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
@@ -144,7 +150,8 @@ export function SettingsPage({
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">
-                  {formatCountLabel(snapshot.totalSecrets, "secret")}
+                  {formatCountLabel(snapshot.totalSecrets, "secret")} in this
+                  scope
                 </Badge>
                 <Badge
                   variant={snapshot.expiredSecrets > 0 ? "destructive" : "outline"}
@@ -169,8 +176,8 @@ export function SettingsPage({
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Rewrap DEKs from v1 onto the active key. The secret plaintext is
-                not rewritten.
+                Rewrap DEKs from v1 onto the active key for the entire mounted
+                secret store. The secret plaintext is not rewritten.
               </CardDescription>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -221,7 +228,8 @@ export function SettingsPage({
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Sweep expired secrets and old audit events in bounded batches.
+                Sweep expired secrets and old audit events across the entire
+                mounted secret store in bounded batches.
               </CardDescription>
               <Button
                 size="xs"
@@ -260,9 +268,12 @@ export function SettingsPage({
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Populate this environment with sample secrets (DATABASE_URL,
-                OPENAI_API_KEY, etc.) including one legacy-version secret for
-                rotation demos.
+                Populate{" "}
+                <span className="font-mono">
+                  {workspace} / {environment}
+                </span>{" "}
+                with sample secrets (DATABASE_URL, OPENAI_API_KEY, etc.)
+                including one legacy-version secret for rotation demos.
               </CardDescription>
               <div className="flex items-center gap-2">
                 <Button
