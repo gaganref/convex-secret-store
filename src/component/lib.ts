@@ -3,7 +3,8 @@ import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 import { metadataValidator } from "../shared.js";
 import { decryptSecret, encryptSecret } from "./crypto.js";
-import { activeVersion, getKEK, hasVersion } from "./keys.js";
+import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
+import { resolveExpiresAt } from "./expiry.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -31,12 +32,17 @@ async function findSecret(
     .unique();
 }
 
+function isExpired(secret: { expiresAt?: number }, now: number): boolean {
+  return secret.expiresAt !== undefined && now >= secret.expiresAt;
+}
+
 /**
  * Encrypt and store a secret value, upserting by `namespace + name`.
  *
  * The plaintext is encrypted with a fresh per-secret DEK wrapped under the
- * active KEK; only ciphertext is persisted. On overwrite, omitted `metadata` is
- * preserved and `null` clears it.
+ * active KEK; only ciphertext is persisted. Expiry is recomputed on every
+ * write (ADR 0003). On overwrite, omitted `metadata` is preserved and `null`
+ * clears it.
  */
 export const put = mutation({
   args: {
@@ -44,11 +50,13 @@ export const put = mutation({
     name: v.string(),
     value: v.string(),
     metadata: v.optional(v.union(metadataValidator, v.null())),
+    ttlMs: v.optional(v.union(v.number(), v.null())),
   },
   returns: v.object({
     secretId: v.id("secrets"),
     createdAt: v.number(),
     updatedAt: v.number(),
+    expiresAt: v.optional(v.number()),
     isNew: v.boolean(),
   }),
   handler: async (ctx, args) => {
@@ -69,6 +77,7 @@ export const put = mutation({
       kek: await getKEK(keyVersion),
     });
     const now = Date.now();
+    const expiresAt = resolveExpiresAt(now, args.ttlMs, defaultTtlMs());
     const existing = await findSecret(ctx, args.namespace, args.name);
 
     if (existing === null) {
@@ -78,9 +87,16 @@ export const put = mutation({
         ...payload,
         keyVersion,
         ...(args.metadata != null ? { metadata: args.metadata } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
         updatedAt: now,
       });
-      return { secretId, createdAt: now, updatedAt: now, isNew: true };
+      return {
+        secretId,
+        createdAt: now,
+        updatedAt: now,
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+        isNew: true,
+      };
     }
 
     const nextMetadata =
@@ -93,12 +109,14 @@ export const put = mutation({
       ...payload,
       keyVersion,
       metadata: nextMetadata,
+      expiresAt,
       updatedAt: now,
     });
     return {
       secretId: existing._id,
       createdAt: existing._creationTime,
       updatedAt: now,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
       isNew: false,
     };
   },
@@ -107,24 +125,30 @@ export const put = mutation({
 /**
  * Load and decrypt a secret value.
  *
- * Returns `not_found` when no row exists, or `key_unavailable` when the row's
- * key version is no longer configured.
+ * Expiry is evaluated against the caller-supplied `now` (ADR 0004). Returns
+ * `not_found`, `expired`, or `key_unavailable` when the secret is unusable.
  */
 export const get = query({
   args: {
     namespace: v.optional(v.string()),
     name: v.string(),
+    now: v.number(),
   },
   returns: v.union(
     v.object({
       ok: v.literal(true),
       value: v.string(),
       metadata: v.optional(metadataValidator),
+      expiresAt: v.optional(v.number()),
       updatedAt: v.number(),
     }),
     v.object({
       ok: v.literal(false),
-      reason: v.union(v.literal("not_found"), v.literal("key_unavailable")),
+      reason: v.union(
+        v.literal("not_found"),
+        v.literal("expired"),
+        v.literal("key_unavailable"),
+      ),
     }),
   ),
   handler: async (ctx, args) => {
@@ -132,6 +156,9 @@ export const get = query({
     const secret = await findSecret(ctx, args.namespace, args.name);
     if (secret === null) {
       return { ok: false as const, reason: "not_found" as const };
+    }
+    if (isExpired(secret, args.now)) {
+      return { ok: false as const, reason: "expired" as const };
     }
     if (!hasVersion(secret.keyVersion)) {
       return { ok: false as const, reason: "key_unavailable" as const };
@@ -160,7 +187,27 @@ export const get = query({
       ok: true as const,
       value,
       metadata: secret.metadata,
+      expiresAt: secret.expiresAt,
       updatedAt: secret.updatedAt,
     };
+  },
+});
+
+/**
+ * Check whether a usable (existing, non-expired) secret is present.
+ *
+ * Expiry is evaluated against the caller-supplied `now` (ADR 0004).
+ */
+export const has = query({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+    now: v.number(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    return secret !== null && !isExpired(secret, args.now);
   },
 });

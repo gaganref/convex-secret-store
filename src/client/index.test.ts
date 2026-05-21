@@ -64,6 +64,40 @@ describe("SecretStore facade", () => {
     expect(result).toEqual({ ok: false, reason: "not_found" });
   });
 
+  test("getOrThrow returns the decrypted payload", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    await secrets.put(mutationCtx, { name: "openai", value: "sk-secret" });
+    const success = await secrets.getOrThrow(queryCtx, { name: "openai" });
+    expect(success.value).toBe("sk-secret");
+  });
+
+  test("getOrThrow throws a typed error when the secret is missing", async () => {
+    const t = initConvexTest();
+    const { queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    const error = await secrets
+      .getOrThrow(queryCtx, { name: "missing" })
+      .catch((caught: unknown) => caught);
+    expect(isSecretStoreError(error)).toBe(true);
+    if (isSecretStoreError(error)) {
+      expect(error.data.code).toBe("not_found");
+    }
+  });
+
+  test("has reports presence through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(false);
+    await secrets.put(mutationCtx, { name: "openai", value: "sk" });
+    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(true);
+  });
+
   test("isSecretStoreError narrows a secret-store ConvexError", async () => {
     const t = initConvexTest();
     const { mutationCtx } = ctxFrom(t);

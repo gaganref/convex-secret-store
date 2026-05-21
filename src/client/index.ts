@@ -12,6 +12,8 @@ export type {
 export type {
   GetArgs,
   GetResult,
+  GetSuccess,
+  HasArgs,
   PutArgs,
   PutResult,
   RunMutationCtx,

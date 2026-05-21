@@ -9,7 +9,9 @@ export type SecretStoreErrorCode =
   | "invalid_keys"
   | "key_unavailable"
   | "decryption_failed"
-  | "value_too_large";
+  | "value_too_large"
+  | "not_found"
+  | "expired";
 
 /** The structured `data` payload carried by every secret-store `ConvexError`. */
 export type SecretStoreErrorData = {
@@ -23,6 +25,8 @@ const CODES: ReadonlySet<string> = new Set<SecretStoreErrorCode>([
   "key_unavailable",
   "decryption_failed",
   "value_too_large",
+  "not_found",
+  "expired",
 ]);
 
 /**

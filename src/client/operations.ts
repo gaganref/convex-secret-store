@@ -1,7 +1,10 @@
+import { ConvexError } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type {
   GetArgs,
   GetResult,
+  GetSuccess,
+  HasArgs,
   PutArgs,
   PutResult,
   RunMutationCtx,
@@ -33,7 +36,9 @@ export class SecretStore<
   /**
    * Encrypt and store a secret value, upserting by `namespace + name`.
    *
-   * On overwrite, omitted `metadata` is preserved; pass `null` to clear it.
+   * Expiry is recomputed on every write: `ttlMs` if given, else the configured
+   * default, else none; pass `ttlMs: null` for no expiry. On overwrite, omitted
+   * `metadata` is preserved; pass `null` to clear it.
    */
   async put(
     ctx: RunMutationCtx,
@@ -44,6 +49,7 @@ export class SecretStore<
       name: args.name,
       value: args.value,
       metadata: args.metadata,
+      ttlMs: args.ttlMs,
     });
   }
 
@@ -51,8 +57,8 @@ export class SecretStore<
    * Load and decrypt a secret value.
    *
    * Returns a discriminated result: `{ ok: true, value, ... }` on success, or
-   * `{ ok: false, reason }` when the secret is missing or its key version is
-   * no longer configured.
+   * `{ ok: false, reason }` when the secret is missing, expired, or its key
+   * version is no longer configured.
    */
   async get(
     ctx: RunQueryCtx,
@@ -61,6 +67,39 @@ export class SecretStore<
     return (await ctx.runQuery(this.component.lib.get, {
       namespace: args.namespace,
       name: args.name,
+      now: Date.now(),
     })) as GetResult<Metadata>;
+  }
+
+  /**
+   * Like `get`, but throws a `ConvexError` instead of returning a failure
+   * result. Use it at call sites that treat a missing or expired secret as an
+   * error.
+   */
+  async getOrThrow(
+    ctx: RunQueryCtx,
+    args: GetArgs<Namespace>,
+  ): Promise<GetSuccess<Metadata>> {
+    const result = await this.get(ctx, args);
+    if (!result.ok) {
+      throw new ConvexError({
+        code: result.reason,
+        message: `secret "${args.name}" is unavailable: ${result.reason}`,
+      });
+    }
+    const { ok: _ok, ...success } = result;
+    return success;
+  }
+
+  /**
+   * Check whether a usable, non-expired secret exists. Expired secrets return
+   * `false`.
+   */
+  async has(ctx: RunQueryCtx, args: HasArgs<Namespace>): Promise<boolean> {
+    return await ctx.runQuery(this.component.lib.has, {
+      namespace: args.namespace,
+      name: args.name,
+      now: Date.now(),
+    });
   }
 }

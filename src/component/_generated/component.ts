@@ -27,14 +27,22 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       get: FunctionReference<
         "query",
         "internal",
-        { name: string; namespace?: string },
+        { name: string; namespace?: string; now: number },
         | {
+            expiresAt?: number;
             metadata?: Record<string, any>;
             ok: true;
             updatedAt: number;
             value: string;
           }
-        | { ok: false; reason: "not_found" | "key_unavailable" },
+        | { ok: false; reason: "not_found" | "expired" | "key_unavailable" },
+        Name
+      >;
+      has: FunctionReference<
+        "query",
+        "internal",
+        { name: string; namespace?: string; now: number },
+        boolean,
         Name
       >;
       put: FunctionReference<
@@ -44,10 +52,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           metadata?: Record<string, any> | null;
           name: string;
           namespace?: string;
+          ttlMs?: number | null;
           value: string;
         },
         {
           createdAt: number;
+          expiresAt?: number;
           isNew: boolean;
           secretId: string;
           updatedAt: number;

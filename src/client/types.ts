@@ -38,26 +38,33 @@ export type PutArgs<
   name: string;
   value: string;
   metadata?: Metadata | null;
+  ttlMs?: number | null;
 };
 
 /** Result of `SecretStore.put`. */
 export type PutResult = PutComponentResult;
 
-/** Arguments for `SecretStore.get`. */
+/** Arguments for `SecretStore.get` and `SecretStore.getOrThrow`. */
 export type GetArgs<Namespace extends string> = {
   namespace?: Namespace;
   name: string;
 };
 
+/** Arguments for `SecretStore.has`. */
+export type HasArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  name: string;
+};
+
+/** The decrypted payload of a successful read. */
+export type GetSuccess<Metadata extends Record<string, unknown>> = {
+  value: string;
+  metadata: Metadata | undefined;
+  expiresAt?: number;
+  updatedAt: number;
+};
+
 /** Result of `SecretStore.get` — a discriminated success/failure union. */
 export type GetResult<Metadata extends Record<string, unknown>> =
-  | {
-      ok: true;
-      value: string;
-      metadata: Metadata | undefined;
-      updatedAt: number;
-    }
-  | {
-      ok: false;
-      reason: "not_found" | "key_unavailable";
-    };
+  | ({ ok: true } & GetSuccess<Metadata>)
+  | { ok: false; reason: "not_found" | "expired" | "key_unavailable" };
