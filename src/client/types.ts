@@ -122,3 +122,25 @@ export type ListEventsArgs<Namespace extends string> = {
 export type ListEventsResult = FunctionReturnType<
   ComponentApi["lib"]["listEvents"]
 >;
+
+/** Arguments for `SecretStore.list`. */
+export type ListArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  paginationOpts: PaginationOptions;
+  order?: "asc" | "desc";
+};
+
+type RawListResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
+
+/** One secret in a `SecretStore.list` page. */
+export type ListItem<Metadata extends Record<string, unknown>> = Omit<
+  RawListResult["page"][number],
+  "metadata"
+> & { metadata: Metadata | undefined };
+
+/** Result of `SecretStore.list`. */
+export type ListResult<Metadata extends Record<string, unknown>> = {
+  page: Array<ListItem<Metadata>>;
+  isDone: boolean;
+  continueCursor: string;
+};

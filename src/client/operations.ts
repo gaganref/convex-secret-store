@@ -5,8 +5,10 @@ import type {
   GetResult,
   GetSuccess,
   HasArgs,
+  ListArgs,
   ListEventsArgs,
   ListEventsResult,
+  ListResult,
   PutArgs,
   PutResult,
   RemoveArgs,
@@ -107,6 +109,22 @@ export class SecretStore<
       name: args.name,
       now: Date.now(),
     });
+  }
+
+  /**
+   * Paginate secrets in a namespace, newest-updated first. Each row carries
+   * `effectiveState`; the decrypted value is never included.
+   */
+  async list(
+    ctx: RunQueryCtx,
+    args: ListArgs<Namespace>,
+  ): Promise<ListResult<Metadata>> {
+    return (await ctx.runQuery(this.component.lib.list, {
+      namespace: args.namespace,
+      paginationOpts: args.paginationOpts,
+      order: args.order,
+      now: Date.now(),
+    })) as ListResult<Metadata>;
   }
 
   /**

@@ -474,3 +474,104 @@ describe("component lib — audit events", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("component lib — list", () => {
+  test("list returns secrets in a namespace", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "one",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "two",
+      value: "v",
+    });
+    const result = await t.query(api.lib.list, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+      now: Date.now(),
+    });
+    expect(result.page.map((secret) => secret.name).sort()).toEqual([
+      "one",
+      "two",
+    ]);
+  });
+
+  test("list orders by most-recently-updated first", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "first",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "second",
+      value: "v",
+    });
+    const result = await t.query(api.lib.list, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+      now: Date.now(),
+    });
+    expect(result.page[0]?.name).toBe("second");
+  });
+
+  test("list reports effectiveState per row", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "perm",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "temp",
+      value: "v",
+      ttlMs: 1_000,
+    });
+    const result = await t.query(api.lib.list, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+      now: Date.now() + 10_000_000,
+    });
+    const states = Object.fromEntries(
+      result.page.map((secret) => [secret.name, secret.effectiveState]),
+    );
+    expect(states).toEqual({ perm: "active", temp: "expired" });
+  });
+
+  test("list is scoped to its namespace", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "k",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "b:prod",
+      name: "k",
+      value: "v",
+    });
+    const result = await t.query(api.lib.list, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+      now: Date.now(),
+    });
+    expect(result.page).toHaveLength(1);
+    expect(result.page[0]?.namespace).toBe("a:prod");
+  });
+
+  test("list rejects an empty namespace", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.query(api.lib.list, {
+        namespace: "",
+        paginationOpts: { numItems: 10, cursor: null },
+        now: Date.now(),
+      }),
+    ).rejects.toThrow();
+  });
+});

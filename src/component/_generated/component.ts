@@ -45,6 +45,39 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         boolean,
         Name
       >;
+      list: FunctionReference<
+        "query",
+        "internal",
+        {
+          namespace?: string;
+          now: number;
+          order?: "asc" | "desc";
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+        },
+        {
+          continueCursor: string;
+          isDone: boolean;
+          page: Array<{
+            createdAt: number;
+            effectiveState: "active" | "expired";
+            expiresAt?: number;
+            keyVersion: number;
+            metadata?: Record<string, any>;
+            name: string;
+            namespace?: string;
+            secretId: string;
+            updatedAt: number;
+          }>;
+        },
+        Name
+      >;
       listEvents: FunctionReference<
         "query",
         "internal",

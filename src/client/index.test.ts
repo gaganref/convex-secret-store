@@ -148,4 +148,27 @@ describe("SecretStore facade", () => {
     expect(events.page).toHaveLength(1);
     expect(events.page[0]?.type).toBe("created");
   });
+
+  test("list paginates secrets through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    await secrets.put(mutationCtx, {
+      namespace: "a:prod",
+      name: "one",
+      value: "v",
+    });
+    await secrets.put(mutationCtx, {
+      namespace: "a:prod",
+      name: "two",
+      value: "v",
+    });
+    const result = await secrets.list(queryCtx, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toHaveLength(2);
+    expect(result.page[0]?.effectiveState).toBe("active");
+  });
 });

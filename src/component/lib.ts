@@ -5,6 +5,7 @@ import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 import schema from "./schema.js";
 import {
+  effectiveStateValidator,
   metadataValidator,
   orderValidator,
   secretEventTypeValidator,
@@ -229,6 +230,67 @@ export const has = query({
     assertValidNamespace(args.namespace);
     const secret = await findSecret(ctx, args.namespace, args.name);
     return secret !== null && !isExpired(secret, args.now);
+  },
+});
+
+const listItemValidator = v.object({
+  secretId: v.id("secrets"),
+  namespace: v.optional(v.string()),
+  name: v.string(),
+  metadata: v.optional(metadataValidator),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+  expiresAt: v.optional(v.number()),
+  effectiveState: effectiveStateValidator,
+  keyVersion: v.number(),
+});
+
+/**
+ * Paginate secrets in a namespace, newest-updated first.
+ *
+ * Each row carries `effectiveState` (evaluated against the caller-supplied
+ * `now`, per ADR 0004) so callers can distinguish active from expired secrets
+ * without an extra query. The decrypted value is never included.
+ */
+export const list = query({
+  args: {
+    namespace: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+    order: orderValidator,
+    now: v.number(),
+  },
+  returns: v.object({
+    page: v.array(listItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    const result = await paginator(ctx.db, schema)
+      .query("secrets")
+      .withIndex("by_namespace_and_updated_at", (q) =>
+        q.eq("namespace", args.namespace),
+      )
+      .order(args.order ?? "desc")
+      .paginate(args.paginationOpts);
+
+    return {
+      page: result.page.map((secret) => ({
+        secretId: secret._id,
+        namespace: secret.namespace,
+        name: secret.name,
+        metadata: secret.metadata,
+        createdAt: secret._creationTime,
+        updatedAt: secret.updatedAt,
+        expiresAt: secret.expiresAt,
+        effectiveState: isExpired(secret, args.now)
+          ? ("expired" as const)
+          : ("active" as const),
+        keyVersion: secret.keyVersion,
+      })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
   },
 });
 

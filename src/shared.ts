@@ -27,3 +27,9 @@ export const secretEventTypeValidator = v.union(
 export const orderValidator = v.optional(
   v.union(v.literal("asc"), v.literal("desc")),
 );
+
+/** Whether a listed secret is currently usable or past its expiry. */
+export const effectiveStateValidator = v.union(
+  v.literal("active"),
+  v.literal("expired"),
+);
