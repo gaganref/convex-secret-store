@@ -5,6 +5,7 @@ import type {
   FunctionVisibility,
 } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component.js";
+import type { SecretEventType } from "../shared.js";
 
 /** A context that can run component queries (query, mutation, or action ctx). */
 export type RunQueryCtx = {
@@ -91,3 +92,33 @@ export type RemoveArgs<Namespace extends string> = {
 
 /** Result of `SecretStore.remove`. */
 export type RemoveResult = FunctionReturnType<ComponentApi["lib"]["remove"]>;
+
+/** Cursor-based pagination options. */
+export type PaginationOptions = {
+  numItems: number;
+  cursor: string | null;
+};
+
+/**
+ * Arguments for `SecretStore.listEvents`.
+ *
+ * Filter by `secretId`, or by `namespace` optionally narrowed with `name` or
+ * `type` — the two forms are mutually exclusive.
+ */
+export type ListEventsArgs<Namespace extends string> = {
+  paginationOpts: PaginationOptions;
+  order?: "asc" | "desc";
+} & (
+  | { secretId: SecretId; namespace?: never; name?: never; type?: never }
+  | {
+      secretId?: never;
+      namespace?: Namespace;
+      name?: string;
+      type?: SecretEventType;
+    }
+);
+
+/** Result of `SecretStore.listEvents`. */
+export type ListEventsResult = FunctionReturnType<
+  ComponentApi["lib"]["listEvents"]
+>;

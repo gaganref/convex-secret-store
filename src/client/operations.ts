@@ -5,6 +5,8 @@ import type {
   GetResult,
   GetSuccess,
   HasArgs,
+  ListEventsArgs,
+  ListEventsResult,
   PutArgs,
   PutResult,
   RemoveArgs,
@@ -132,6 +134,24 @@ export class SecretStore<
     return await ctx.runMutation(this.component.lib.remove, {
       namespace: args.namespace,
       name: args.name,
+    });
+  }
+
+  /**
+   * Paginate audit events — by `secretId`, or by `namespace` optionally
+   * narrowed with `name` or `type`.
+   */
+  async listEvents(
+    ctx: RunQueryCtx,
+    args: ListEventsArgs<Namespace>,
+  ): Promise<ListEventsResult> {
+    return await ctx.runQuery(this.component.lib.listEvents, {
+      namespace: args.namespace,
+      secretId: args.secretId,
+      name: args.name,
+      type: args.type,
+      paginationOpts: args.paginationOpts,
+      order: args.order,
     });
   }
 }

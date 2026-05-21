@@ -135,4 +135,17 @@ describe("SecretStore facade", () => {
     expect(removed).toEqual({ removed: true });
     expect(await secrets.has(queryCtx, { name: "openai" })).toBe(false);
   });
+
+  test("listEvents paginates audit events through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    await secrets.put(mutationCtx, { name: "openai", value: "sk" });
+    const events = await secrets.listEvents(queryCtx, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.type).toBe("created");
+  });
 });

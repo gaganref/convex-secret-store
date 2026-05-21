@@ -1,10 +1,18 @@
 import { ConvexError, v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
+import { paginator } from "convex-helpers/server/pagination";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
-import { metadataValidator } from "../shared.js";
+import schema from "./schema.js";
+import {
+  metadataValidator,
+  orderValidator,
+  secretEventTypeValidator,
+} from "../shared.js";
 import { decryptSecret, encryptSecret } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt } from "./expiry.js";
+import { recordEvent } from "./events.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -42,7 +50,7 @@ function isExpired(secret: { expiresAt?: number }, now: number): boolean {
  * The plaintext is encrypted with a fresh per-secret DEK wrapped under the
  * active KEK; only ciphertext is persisted. Expiry is recomputed on every
  * write (ADR 0003). On overwrite, omitted `metadata` is preserved and `null`
- * clears it.
+ * clears it. Records a `created` or `updated` audit event.
  */
 export const put = mutation({
   args: {
@@ -90,6 +98,12 @@ export const put = mutation({
         ...(expiresAt !== undefined ? { expiresAt } : {}),
         updatedAt: now,
       });
+      await recordEvent(ctx, {
+        secretId,
+        namespace: args.namespace,
+        name: args.name,
+        type: "created",
+      });
       return {
         secretId,
         createdAt: now,
@@ -111,6 +125,12 @@ export const put = mutation({
       metadata: nextMetadata,
       expiresAt,
       updatedAt: now,
+    });
+    await recordEvent(ctx, {
+      secretId: existing._id,
+      namespace: args.namespace,
+      name: args.name,
+      type: "updated",
     });
     return {
       secretId: existing._id,
@@ -217,7 +237,8 @@ export const has = query({
  *
  * Omitted fields are preserved; pass `null` to clear `metadata` or expiry, or
  * `ttlMs` to set expiry to `now + ttlMs`. Returns `updated: false` when the
- * secret does not exist or nothing was supplied to change.
+ * secret does not exist or nothing was supplied to change. Records an
+ * `updated` audit event when a change is applied.
  */
 export const update = mutation({
   args: {
@@ -259,6 +280,12 @@ export const update = mutation({
       patch.expiresAt = nextExpiresAt;
     }
     await ctx.db.patch(secret._id, patch);
+    await recordEvent(ctx, {
+      secretId: secret._id,
+      namespace: secret.namespace,
+      name: secret.name,
+      type: "updated",
+    });
 
     return {
       updated: true as const,
@@ -268,7 +295,10 @@ export const update = mutation({
   },
 });
 
-/** Delete a secret. Returns `removed: false` when it does not exist. */
+/**
+ * Delete a secret. Records a `deleted` audit event with reason `removed`.
+ * Returns `removed: false` when the secret does not exist.
+ */
 export const remove = mutation({
   args: {
     namespace: v.optional(v.string()),
@@ -281,7 +311,117 @@ export const remove = mutation({
     if (secret === null) {
       return { removed: false };
     }
+    await recordEvent(ctx, {
+      secretId: secret._id,
+      namespace: secret.namespace,
+      name: secret.name,
+      type: "deleted",
+      metadata: { reason: "removed" },
+    });
     await ctx.db.delete(secret._id);
     return { removed: true };
+  },
+});
+
+const eventItemValidator = v.object({
+  eventId: v.id("secretEvents"),
+  secretId: v.id("secrets"),
+  namespace: v.optional(v.string()),
+  name: v.string(),
+  type: secretEventTypeValidator,
+  metadata: v.optional(metadataValidator),
+  createdAt: v.number(),
+});
+
+/**
+ * Paginate audit events.
+ *
+ * Filter by `secretId`, or by `namespace` optionally narrowed with `name` or
+ * `type`. V1 restrictions: `secretId` cannot combine with the other filters,
+ * `name` and `type` cannot combine, and `name`/`type` require `namespace`.
+ */
+export const listEvents = query({
+  args: {
+    namespace: v.optional(v.string()),
+    secretId: v.optional(v.id("secrets")),
+    name: v.optional(v.string()),
+    type: v.optional(secretEventTypeValidator),
+    paginationOpts: paginationOptsValidator,
+    order: orderValidator,
+  },
+  returns: v.object({
+    page: v.array(eventItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    const { secretId, namespace, name, type } = args;
+
+    if (
+      secretId !== undefined &&
+      (namespace !== undefined || name !== undefined || type !== undefined)
+    ) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "secretId cannot be combined with namespace, name, or type",
+      });
+    }
+    if (name !== undefined && type !== undefined) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "name and type cannot be combined",
+      });
+    }
+    if ((name !== undefined || type !== undefined) && namespace === undefined) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "namespace is required when filtering by name or type",
+      });
+    }
+
+    const order = args.order ?? "desc";
+    const events = paginator(ctx.db, schema).query("secretEvents");
+
+    let result;
+    if (secretId !== undefined) {
+      result = await events
+        .withIndex("by_secret_id", (q) => q.eq("secretId", secretId))
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else if (name !== undefined) {
+      result = await events
+        .withIndex("by_namespace_and_name", (q) =>
+          q.eq("namespace", namespace).eq("name", name),
+        )
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else if (type !== undefined) {
+      result = await events
+        .withIndex("by_namespace_and_type", (q) =>
+          q.eq("namespace", namespace).eq("type", type),
+        )
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else {
+      result = await events
+        .withIndex("by_namespace", (q) => q.eq("namespace", namespace))
+        .order(order)
+        .paginate(args.paginationOpts);
+    }
+
+    return {
+      page: result.page.map((event) => ({
+        eventId: event._id,
+        secretId: event.secretId,
+        namespace: event.namespace,
+        name: event.name,
+        type: event.type,
+        metadata: event.metadata,
+        createdAt: event._creationTime,
+      })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
   },
 });

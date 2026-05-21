@@ -322,3 +322,155 @@ describe("component lib — update and remove", () => {
     expect(result).toEqual({ removed: false });
   });
 });
+
+describe("component lib — audit events", () => {
+  test("put records a created event", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "openai", value: "v" });
+    const events = await t.query(api.lib.listEvents, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]).toMatchObject({ name: "openai", type: "created" });
+  });
+
+  test("overwriting records an updated event", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v1" });
+    await t.mutation(api.lib.put, { name: "k", value: "v2" });
+    const events = await t.query(api.lib.listEvents, {
+      paginationOpts: { numItems: 10, cursor: null },
+      order: "asc",
+    });
+    expect(events.page.map((event) => event.type)).toEqual([
+      "created",
+      "updated",
+    ]);
+  });
+
+  test("update records an updated event", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v" });
+    await t.mutation(api.lib.update, { name: "k", metadata: { o: "x" } });
+    const events = await t.query(api.lib.listEvents, {
+      paginationOpts: { numItems: 10, cursor: null },
+      order: "asc",
+    });
+    expect(events.page.map((event) => event.type)).toEqual([
+      "created",
+      "updated",
+    ]);
+  });
+
+  test("remove records a deleted event with a reason", async () => {
+    const t = initConvexTest();
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+    await t.mutation(api.lib.remove, { name: "k" });
+    const events = await t.query(api.lib.listEvents, {
+      secretId: created.secretId,
+      paginationOpts: { numItems: 10, cursor: null },
+      order: "asc",
+    });
+    expect(events.page.map((event) => event.type)).toEqual([
+      "created",
+      "deleted",
+    ]);
+    expect(events.page[1]?.metadata).toEqual({ reason: "removed" });
+  });
+
+  test("listEvents filters by namespace", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "k",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "b:prod",
+      name: "k",
+      value: "v",
+    });
+    const events = await t.query(api.lib.listEvents, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.namespace).toBe("a:prod");
+  });
+
+  test("listEvents filters by name", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "openai",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "stripe",
+      value: "v",
+    });
+    const events = await t.query(api.lib.listEvents, {
+      namespace: "a:prod",
+      name: "openai",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.name).toBe("openai");
+  });
+
+  test("listEvents filters by type", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "k",
+      value: "v1",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "a:prod",
+      name: "k",
+      value: "v2",
+    });
+    const events = await t.query(api.lib.listEvents, {
+      namespace: "a:prod",
+      type: "updated",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.type).toBe("updated");
+  });
+
+  test("listEvents rejects combining name and type", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.query(api.lib.listEvents, {
+        namespace: "a:prod",
+        name: "k",
+        type: "created",
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow();
+  });
+
+  test("listEvents rejects combining secretId with namespace", async () => {
+    const t = initConvexTest();
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+    await expect(
+      t.query(api.lib.listEvents, {
+        secretId: created.secretId,
+        namespace: "a:prod",
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow();
+  });
+
+  test("listEvents rejects name without namespace", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.query(api.lib.listEvents, {
+        name: "k",
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow();
+  });
+});
