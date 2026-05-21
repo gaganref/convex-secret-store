@@ -1,34 +1,20 @@
 export { SecretStore, SecretStore as default } from "./operations.js";
 
-export { SecretStoreClientError, isSecretStoreClientError } from "./errors.js";
+export { defineKeys } from "../keys-format.js";
+export type { KeyEntry } from "../keys-format.js";
 
-export type { SecretStoreClientErrorCode } from "./errors.js";
-export type { SecretStoreOptions } from "./options.js";
+export { isSecretStoreError } from "./errors.js";
+export type {
+  SecretStoreErrorCode,
+  SecretStoreErrorData,
+} from "./errors.js";
 
 export type {
-  CleanupEventsArgs,
-  CleanupEventsResult,
-  CleanupSecretsArgs,
-  CleanupSecretsResult,
   GetArgs,
   GetResult,
-  HasArgs,
-  ListArgs,
-  ListEventsArgs,
-  ListEventsResult,
-  ListResult,
-  PaginationOptions,
   PutArgs,
   PutResult,
-  RemoveArgs,
-  RemoveResult,
-  RotateKeysArgs,
-  RotateKeysResult,
   RunMutationCtx,
   RunQueryCtx,
-  RunReadWriteCtx,
   SecretId,
-  SecretStoreTypeOptions,
-  UpdateArgs,
-  UpdateResult,
 } from "./types.js";

@@ -4,196 +4,17 @@ import type {
   FunctionReturnType,
   FunctionVisibility,
 } from "convex/server";
-import type { SecretEventType } from "../shared.js";
 import type { ComponentApi } from "../component/_generated/component.js";
 
-type PutMutationResult = FunctionReturnType<ComponentApi["lib"]["put"]>;
-type GetQueryResult = FunctionReturnType<ComponentApi["lib"]["get"]>;
-type ListQueryResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
-type ListEventsQueryResult = FunctionReturnType<
-  ComponentApi["lib"]["listEvents"]
->;
-type CleanupSecretsMutationResult = FunctionReturnType<
-  ComponentApi["cleanup"]["cleanupSecrets"]
->;
-type CleanupEventsMutationResult = FunctionReturnType<
-  ComponentApi["cleanup"]["cleanupEvents"]
->;
-
-export type SecretStoreTypeOptions = {
-  namespace?: string;
-  metadata?: Record<string, unknown>;
+/** A context that can run component queries (query, mutation, or action ctx). */
+export type RunQueryCtx = {
+  runQuery: <Query extends FunctionReference<"query", FunctionVisibility>>(
+    query: Query,
+    args: FunctionArgs<Query>,
+  ) => Promise<FunctionReturnType<Query>>;
 };
 
-type NamespaceArg<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  namespace: infer N extends string;
-}
-  ? { namespace: N }
-  : { namespace?: never };
-
-type NamespaceOutput<TOptions extends SecretStoreTypeOptions> =
-  TOptions extends {
-    namespace: infer N extends string;
-  }
-    ? N | undefined
-    : undefined;
-
-type MetadataInput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  metadata: infer M extends Record<string, unknown>;
-}
-  ? M
-  : Record<string, unknown>;
-
-type MetadataOutput<TOptions extends SecretStoreTypeOptions> =
-  TOptions extends {
-    metadata: infer M extends Record<string, unknown>;
-  }
-    ? M | undefined
-    : Record<string, unknown> | undefined;
-
-type ListItemBase = ListQueryResult["page"][number];
-type EventItemBase = ListEventsQueryResult["page"][number];
-type GetFailureBase = Extract<GetQueryResult, { ok: false }>;
-
-export type SecretId = PutMutationResult["secretId"];
-
-export type PaginationOptions = {
-  numItems: number;
-  cursor: string | null;
-};
-
-export type PutArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-  value: string;
-  metadata?: MetadataInput<TOptions> | null;
-  ttlMs?: number | null;
-};
-
-export type PutResult = PutMutationResult;
-
-export type GetArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type GetResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> =
-  | {
-      ok: true;
-      value: string;
-      metadata: MetadataOutput<TOptions>;
-      expiresAt?: number;
-      updatedAt: number;
-    }
-  | GetFailureBase
-  | { ok: false; reason: "key_version_unavailable" };
-
-export type HasArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type RemoveArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type RemoveResult = FunctionReturnType<ComponentApi["lib"]["remove"]>;
-
-export type UpdateArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-  metadata?: MetadataInput<TOptions> | null;
-  expiresAt?: number | null;
-};
-
-export type UpdateResult = FunctionReturnType<ComponentApi["lib"]["update"]>;
-
-export type ListArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  paginationOpts: PaginationOptions;
-  order?: "asc" | "desc";
-};
-
-export type ListResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = Omit<ListQueryResult, "page"> & {
-  page: Array<
-    Omit<ListItemBase, "metadata" | "namespace"> & {
-      metadata: MetadataOutput<TOptions>;
-      namespace?: NamespaceOutput<TOptions>;
-    }
-  >;
-};
-
-type ListEventsBySecretIdArgs = {
-  secretId: SecretId;
-  name?: never;
-  type?: never;
-};
-
-type ListEventsByNamespaceArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  secretId?: never;
-  name?: string;
-  type?: SecretEventType;
-};
-
-export type ListEventsArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = {
-  paginationOpts: PaginationOptions;
-  order?: "asc" | "desc";
-} & (ListEventsBySecretIdArgs | ListEventsByNamespaceArgs<TOptions>);
-
-export type ListEventsResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = Omit<ListEventsQueryResult, "page"> & {
-  page: Array<
-    Omit<EventItemBase, "namespace"> & {
-      namespace?: NamespaceOutput<TOptions>;
-    }
-  >;
-};
-
-export type RotateKeysArgs = {
-  fromVersion: number;
-  batchSize?: number;
-  cursor?: string | null;
-  order?: "asc" | "desc";
-};
-
-export type RotateKeysResult = {
-  fromVersion: number;
-  toVersion: number;
-  processed: number;
-  rotated: number;
-  skipped: number;
-  isDone: boolean;
-  continueCursor: string | null;
-};
-
-export type CleanupSecretsArgs = {
-  retentionMs?: number;
-};
-
-export type CleanupSecretsResult = CleanupSecretsMutationResult;
-
-export type CleanupEventsArgs = {
-  retentionMs?: number;
-};
-
-export type CleanupEventsResult = CleanupEventsMutationResult;
-
+/** A context that can run component mutations (mutation or action ctx). */
 export type RunMutationCtx = {
   runMutation: <
     Mutation extends FunctionReference<"mutation", FunctionVisibility>,
@@ -203,11 +24,40 @@ export type RunMutationCtx = {
   ) => Promise<FunctionReturnType<Mutation>>;
 };
 
-export type RunQueryCtx = {
-  runQuery: <Query extends FunctionReference<"query", FunctionVisibility>>(
-    query: Query,
-    args: FunctionArgs<Query>,
-  ) => Promise<FunctionReturnType<Query>>;
+type PutComponentResult = FunctionReturnType<ComponentApi["lib"]["put"]>;
+
+/** The id of a stored secret. */
+export type SecretId = PutComponentResult["secretId"];
+
+/** Arguments for `SecretStore.put`. */
+export type PutArgs<
+  Namespace extends string,
+  Metadata extends Record<string, unknown>,
+> = {
+  namespace?: Namespace;
+  name: string;
+  value: string;
+  metadata?: Metadata | null;
 };
 
-export type RunReadWriteCtx = RunMutationCtx & RunQueryCtx;
+/** Result of `SecretStore.put`. */
+export type PutResult = PutComponentResult;
+
+/** Arguments for `SecretStore.get`. */
+export type GetArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  name: string;
+};
+
+/** Result of `SecretStore.get` — a discriminated success/failure union. */
+export type GetResult<Metadata extends Record<string, unknown>> =
+  | {
+      ok: true;
+      value: string;
+      metadata: Metadata | undefined;
+      updatedAt: number;
+    }
+  | {
+      ok: false;
+      reason: "not_found" | "key_unavailable";
+    };

@@ -1,64 +1,46 @@
-export type SecretStoreClientErrorCode =
-  | "INVALID_OPTIONS"
-  | "INVALID_ARGUMENT"
-  | "KEY_VERSION_UNAVAILABLE"
-  | "RUNTIME_UNAVAILABLE"
-  | "OPERATION_FAILED";
+import { ConvexError } from "convex/values";
 
-export class SecretStoreClientError extends Error {
-  readonly name = "SecretStoreClientError";
-  readonly code: SecretStoreClientErrorCode;
-  readonly cause?: unknown;
+/**
+ * Stable error codes thrown by the secret store. Every secret-store failure is
+ * a `ConvexError` whose `data` carries one of these codes.
+ */
+export type SecretStoreErrorCode =
+  | "invalid_argument"
+  | "invalid_keys"
+  | "key_unavailable"
+  | "decryption_failed"
+  | "value_too_large";
 
-  constructor(
-    code: SecretStoreClientErrorCode,
-    message: string,
-    cause?: unknown,
-  ) {
-    super(message);
-    this.code = code;
-    this.cause = cause;
-  }
-}
+/** The structured `data` payload carried by every secret-store `ConvexError`. */
+export type SecretStoreErrorData = {
+  code: SecretStoreErrorCode;
+  message: string;
+};
 
-export function isSecretStoreClientError(
+const CODES: ReadonlySet<string> = new Set<SecretStoreErrorCode>([
+  "invalid_argument",
+  "invalid_keys",
+  "key_unavailable",
+  "decryption_failed",
+  "value_too_large",
+]);
+
+/**
+ * Type guard for errors thrown by the secret store. Narrows to a `ConvexError`
+ * whose `data` carries a typed {@link SecretStoreErrorCode}, so callers can
+ * branch on `error.data.code`.
+ */
+export function isSecretStoreError(
   error: unknown,
-): error is SecretStoreClientError {
-  return error instanceof SecretStoreClientError;
-}
-
-export function optionsError(message: string) {
-  return new SecretStoreClientError(
-    "INVALID_OPTIONS",
-    `secret-store options: ${message}`,
-  );
-}
-
-export function invalidArgumentError(message: string) {
-  return new SecretStoreClientError(
-    "INVALID_ARGUMENT",
-    `secret-store: ${message}`,
-  );
-}
-
-export function keyVersionUnavailableError(version: number) {
-  return new SecretStoreClientError(
-    "KEY_VERSION_UNAVAILABLE",
-    `secret-store: key version ${version} is not configured`,
-  );
-}
-
-export function runtimeUnavailableError(message: string) {
-  return new SecretStoreClientError(
-    "RUNTIME_UNAVAILABLE",
-    `secret-store runtime: ${message}`,
-  );
-}
-
-export function operationFailedError(message: string, cause: unknown) {
-  return new SecretStoreClientError(
-    "OPERATION_FAILED",
-    `secret-store operation failed: ${message}`,
-    cause,
+): error is ConvexError<SecretStoreErrorData> {
+  if (!(error instanceof ConvexError)) {
+    return false;
+  }
+  const data = error.data as { code?: unknown } | null | undefined;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    typeof data.code === "string" &&
+    CODES.has(data.code)
   );
 }
