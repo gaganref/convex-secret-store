@@ -45,6 +45,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         boolean,
         Name
       >;
+      isRotationComplete: FunctionReference<
+        "query",
+        "internal",
+        {},
+        boolean,
+        Name
+      >;
       list: FunctionReference<
         "query",
         "internal",
@@ -135,6 +142,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { name: string; namespace?: string },
         { removed: boolean },
+        Name
+      >;
+      rotate: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        { isDone: boolean; rotated: number },
         Name
       >;
       update: FunctionReference<

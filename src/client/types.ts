@@ -144,3 +144,6 @@ export type ListResult<Metadata extends Record<string, unknown>> = {
   isDone: boolean;
   continueCursor: string;
 };
+
+/** Result of `SecretStore.rotate`. */
+export type RotateResult = FunctionReturnType<ComponentApi["lib"]["rotate"]>;

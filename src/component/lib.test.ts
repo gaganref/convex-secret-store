@@ -5,6 +5,7 @@ import { defineKeys } from "../keys-format.js";
 import { resetKeyConfig } from "./keys.js";
 
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
+const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
 
 beforeEach(() => {
@@ -573,5 +574,62 @@ describe("component lib — list", () => {
         now: Date.now(),
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("component lib — rotation", () => {
+  test("rotate rewraps a stale secret onto the active version", async () => {
+    const t = initConvexTest();
+    // Stage 1 — only v1 configured; the secret is wrapped under v1.
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    await t.mutation(api.lib.put, { name: "k", value: "secret-value" });
+
+    // Stage 2 — add v2 (now active); the v1 row is stale.
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([
+      { version: 1, value: RAW_V1 },
+      { version: 2, value: RAW_V2 },
+    ]);
+
+    expect(await t.query(api.lib.isRotationComplete, {})).toBe(false);
+    const result = await t.mutation(api.lib.rotate, {});
+    expect(result).toEqual({ rotated: 1, isDone: true });
+    expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
+
+    const loaded = await t.query(api.lib.get, { name: "k", now: Date.now() });
+    expect(loaded).toMatchObject({ ok: true, value: "secret-value" });
+  });
+
+  test("rotate records a rotated audit event", async () => {
+    const t = initConvexTest();
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([
+      { version: 1, value: RAW_V1 },
+      { version: 2, value: RAW_V2 },
+    ]);
+    await t.mutation(api.lib.rotate, {});
+
+    const events = await t.query(api.lib.listEvents, {
+      secretId: created.secretId,
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page.map((event) => event.type)).toContain("rotated");
+  });
+
+  test("rotate is a no-op when every secret is on the active version", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v" });
+    const result = await t.mutation(api.lib.rotate, {});
+    expect(result).toEqual({ rotated: 0, isDone: true });
+  });
+
+  test("isRotationComplete is true for an empty store", async () => {
+    const t = initConvexTest();
+    expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
   });
 });

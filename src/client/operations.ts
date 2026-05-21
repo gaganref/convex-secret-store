@@ -13,6 +13,7 @@ import type {
   PutResult,
   RemoveArgs,
   RemoveResult,
+  RotateResult,
   RunMutationCtx,
   RunQueryCtx,
   UpdateArgs,
@@ -171,5 +172,22 @@ export class SecretStore<
       paginationOpts: args.paginationOpts,
       order: args.order,
     });
+  }
+
+  /**
+   * Rewrap secrets onto the active KEK version. Call once after deploying a new
+   * key — it drains in the background; safe to call again to resume a stalled
+   * run. Returns the first batch's `{ rotated, isDone }`.
+   */
+  async rotate(ctx: RunMutationCtx): Promise<RotateResult> {
+    return await ctx.runMutation(this.component.lib.rotate, {});
+  }
+
+  /**
+   * Whether every secret is on the active KEK version. Check this before
+   * retiring an old key.
+   */
+  async isRotationComplete(ctx: RunQueryCtx): Promise<boolean> {
+    return await ctx.runQuery(this.component.lib.isRotationComplete, {});
   }
 }

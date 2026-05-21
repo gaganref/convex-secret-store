@@ -3,6 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import { paginator } from "convex-helpers/server/pagination";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
+import { api } from "./_generated/api.js";
 import schema from "./schema.js";
 import {
   effectiveStateValidator,
@@ -10,7 +11,7 @@ import {
   orderValidator,
   secretEventTypeValidator,
 } from "../shared.js";
-import { decryptSecret, encryptSecret } from "./crypto.js";
+import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt } from "./expiry.js";
 import { recordEvent } from "./events.js";
@@ -485,5 +486,82 @@ export const listEvents = query({
       isDone: result.isDone,
       continueCursor: result.continueCursor,
     };
+  },
+});
+
+/** Batch size for one rotation transaction. */
+const ROTATION_BATCH_SIZE = 100;
+
+/**
+ * Rewrap a batch of secrets onto the active KEK version.
+ *
+ * Processes up to 100 rows whose `keyVersion` is below the active version in a
+ * single transaction, then reschedules itself while stale rows remain. Per
+ * ADR 0002 there is no cursor and no progress table — the `keyVersion < active`
+ * slice is self-consuming, so each batch scans a shrinking range from the
+ * start. Records a `rotated` audit event per row; safe to call repeatedly.
+ */
+export const rotate = mutation({
+  args: {},
+  returns: v.object({
+    rotated: v.number(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx) => {
+    const active = activeVersion();
+    const stale = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
+      .take(ROTATION_BATCH_SIZE);
+
+    const toKek = await getKEK(active);
+    for (const secret of stale) {
+      const rewrapped = await rewrapDEK({
+        wrappedDEK: secret.wrappedDEK,
+        dekIv: secret.dekIv,
+        namespace: secret.namespace,
+        name: secret.name,
+        fromVersion: secret.keyVersion,
+        toVersion: active,
+        fromKek: await getKEK(secret.keyVersion),
+        toKek,
+      });
+      await ctx.db.patch(secret._id, {
+        wrappedDEK: rewrapped.wrappedDEK,
+        dekIv: rewrapped.dekIv,
+        keyVersion: active,
+      });
+      await recordEvent(ctx, {
+        secretId: secret._id,
+        namespace: secret.namespace,
+        name: secret.name,
+        type: "rotated",
+        metadata: { fromVersion: secret.keyVersion, toVersion: active },
+      });
+    }
+
+    const isDone = stale.length < ROTATION_BATCH_SIZE;
+    if (!isDone) {
+      await ctx.scheduler.runAfter(0, api.lib.rotate, {});
+    }
+    return { rotated: stale.length, isDone };
+  },
+});
+
+/**
+ * Whether every secret is on the active KEK version.
+ *
+ * Use this to confirm rotation has fully drained before retiring an old key.
+ */
+export const isRotationComplete = query({
+  args: {},
+  returns: v.boolean(),
+  handler: async (ctx) => {
+    const active = activeVersion();
+    const stale = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
+      .first();
+    return stale === null;
   },
 });

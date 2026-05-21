@@ -24,6 +24,7 @@ export type {
   PutResult,
   RemoveArgs,
   RemoveResult,
+  RotateResult,
   RunMutationCtx,
   RunQueryCtx,
   SecretId,

@@ -6,6 +6,7 @@ import { resetKeyConfig } from "../component/keys.js";
 import type { RunMutationCtx, RunQueryCtx } from "./types.js";
 
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
+const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 
 beforeEach(() => {
   resetKeyConfig();
@@ -170,5 +171,25 @@ describe("SecretStore facade", () => {
     });
     expect(result.page).toHaveLength(2);
     expect(result.page[0]?.effectiveState).toBe("active");
+  });
+
+  test("rotate and isRotationComplete work through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    await secrets.put(mutationCtx, { name: "k", value: "v" });
+
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys([
+      { version: 1, value: RAW_V1 },
+      { version: 2, value: RAW_V2 },
+    ]);
+    expect(await secrets.isRotationComplete(queryCtx)).toBe(false);
+    const result = await secrets.rotate(mutationCtx);
+    expect(result.isDone).toBe(true);
+    expect(await secrets.isRotationComplete(queryCtx)).toBe(true);
   });
 });
