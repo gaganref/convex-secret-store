@@ -7,8 +7,12 @@ import type {
   HasArgs,
   PutArgs,
   PutResult,
+  RemoveArgs,
+  RemoveResult,
   RunMutationCtx,
   RunQueryCtx,
+  UpdateArgs,
+  UpdateResult,
 } from "./types.js";
 
 /**
@@ -100,6 +104,34 @@ export class SecretStore<
       namespace: args.namespace,
       name: args.name,
       now: Date.now(),
+    });
+  }
+
+  /**
+   * Update a secret's metadata or expiry without re-encrypting its value.
+   *
+   * Omitted fields are preserved; pass `null` to clear `metadata` or expiry.
+   */
+  async update(
+    ctx: RunMutationCtx,
+    args: UpdateArgs<Namespace, Metadata>,
+  ): Promise<UpdateResult> {
+    return await ctx.runMutation(this.component.lib.update, {
+      namespace: args.namespace,
+      name: args.name,
+      metadata: args.metadata,
+      ttlMs: args.ttlMs,
+    });
+  }
+
+  /** Delete a secret. Returns `removed: false` when it does not exist. */
+  async remove(
+    ctx: RunMutationCtx,
+    args: RemoveArgs<Namespace>,
+  ): Promise<RemoveResult> {
+    return await ctx.runMutation(this.component.lib.remove, {
+      namespace: args.namespace,
+      name: args.name,
     });
   }
 }

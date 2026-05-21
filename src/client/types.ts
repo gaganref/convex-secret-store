@@ -68,3 +68,26 @@ export type GetSuccess<Metadata extends Record<string, unknown>> = {
 export type GetResult<Metadata extends Record<string, unknown>> =
   | ({ ok: true } & GetSuccess<Metadata>)
   | { ok: false; reason: "not_found" | "expired" | "key_unavailable" };
+
+/** Arguments for `SecretStore.update`. */
+export type UpdateArgs<
+  Namespace extends string,
+  Metadata extends Record<string, unknown>,
+> = {
+  namespace?: Namespace;
+  name: string;
+  metadata?: Metadata | null;
+  ttlMs?: number | null;
+};
+
+/** Result of `SecretStore.update`. */
+export type UpdateResult = FunctionReturnType<ComponentApi["lib"]["update"]>;
+
+/** Arguments for `SecretStore.remove`. */
+export type RemoveArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  name: string;
+};
+
+/** Result of `SecretStore.remove`. */
+export type RemoveResult = FunctionReturnType<ComponentApi["lib"]["remove"]>;

@@ -64,5 +64,24 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
+      remove: FunctionReference<
+        "mutation",
+        "internal",
+        { name: string; namespace?: string },
+        { removed: boolean },
+        Name
+      >;
+      update: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          metadata?: Record<string, any> | null;
+          name: string;
+          namespace?: string;
+          ttlMs?: number | null;
+        },
+        { expiresAt?: number; updated: boolean; updatedAt?: number },
+        Name
+      >;
     };
   };

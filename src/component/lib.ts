@@ -211,3 +211,77 @@ export const has = query({
     return secret !== null && !isExpired(secret, args.now);
   },
 });
+
+/**
+ * Update a secret's metadata or expiry without re-encrypting its value.
+ *
+ * Omitted fields are preserved; pass `null` to clear `metadata` or expiry, or
+ * `ttlMs` to set expiry to `now + ttlMs`. Returns `updated: false` when the
+ * secret does not exist or nothing was supplied to change.
+ */
+export const update = mutation({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+    metadata: v.optional(v.union(metadataValidator, v.null())),
+    ttlMs: v.optional(v.union(v.number(), v.null())),
+  },
+  returns: v.object({
+    updated: v.boolean(),
+    updatedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+  }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    if (args.metadata === undefined && args.ttlMs === undefined) {
+      return { updated: false as const };
+    }
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    if (secret === null) {
+      return { updated: false as const };
+    }
+
+    const now = Date.now();
+    const nextExpiresAt =
+      args.ttlMs === undefined
+        ? secret.expiresAt
+        : resolveExpiresAt(now, args.ttlMs, null);
+
+    const patch: {
+      updatedAt: number;
+      metadata?: Record<string, unknown>;
+      expiresAt?: number;
+    } = { updatedAt: now };
+    if (args.metadata !== undefined) {
+      patch.metadata = args.metadata === null ? undefined : args.metadata;
+    }
+    if (args.ttlMs !== undefined) {
+      patch.expiresAt = nextExpiresAt;
+    }
+    await ctx.db.patch(secret._id, patch);
+
+    return {
+      updated: true as const,
+      updatedAt: now,
+      ...(nextExpiresAt !== undefined ? { expiresAt: nextExpiresAt } : {}),
+    };
+  },
+});
+
+/** Delete a secret. Returns `removed: false` when it does not exist. */
+export const remove = mutation({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+  },
+  returns: v.object({ removed: v.boolean() }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    if (secret === null) {
+      return { removed: false };
+    }
+    await ctx.db.delete(secret._id);
+    return { removed: true };
+  },
+});

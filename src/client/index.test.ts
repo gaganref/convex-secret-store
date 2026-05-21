@@ -112,4 +112,27 @@ describe("SecretStore facade", () => {
       expect(error.data.code).toBe("invalid_argument");
     }
   });
+
+  test("update and remove work through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore<string, { owner: string }>(
+      components.secretStore,
+    );
+
+    await secrets.put(mutationCtx, {
+      name: "openai",
+      value: "sk",
+      metadata: { owner: "platform" },
+    });
+    const updated = await secrets.update(mutationCtx, {
+      name: "openai",
+      metadata: { owner: "ops" },
+    });
+    expect(updated.updated).toBe(true);
+
+    const removed = await secrets.remove(mutationCtx, { name: "openai" });
+    expect(removed).toEqual({ removed: true });
+    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(false);
+  });
 });

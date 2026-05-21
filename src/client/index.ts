@@ -16,7 +16,11 @@ export type {
   HasArgs,
   PutArgs,
   PutResult,
+  RemoveArgs,
+  RemoveResult,
   RunMutationCtx,
   RunQueryCtx,
   SecretId,
+  UpdateArgs,
+  UpdateResult,
 } from "./types.js";

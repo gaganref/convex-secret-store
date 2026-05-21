@@ -213,3 +213,112 @@ describe("component lib — put, get, has", () => {
     expect(overwritten.expiresAt).toBeUndefined();
   });
 });
+
+describe("component lib — update and remove", () => {
+  test("update changes metadata without touching the value", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      name: "stripe",
+      value: "sk_live",
+      metadata: { owner: "billing" },
+    });
+    const result = await t.mutation(api.lib.update, {
+      name: "stripe",
+      metadata: { owner: "finance" },
+    });
+    expect(result.updated).toBe(true);
+
+    const loaded = await t.query(api.lib.get, {
+      name: "stripe",
+      now: Date.now(),
+    });
+    expect(loaded).toMatchObject({
+      ok: true,
+      value: "sk_live",
+      metadata: { owner: "finance" },
+    });
+  });
+
+  test("update sets expiry from ttlMs", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v" });
+    const result = await t.mutation(api.lib.update, {
+      name: "k",
+      ttlMs: 60_000,
+    });
+    expect(result.updated).toBe(true);
+    if (result.updated) {
+      expect(result.expiresAt).toBeTypeOf("number");
+    }
+  });
+
+  test("update preserves the field it is not given", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      name: "k",
+      value: "v",
+      metadata: { owner: "platform" },
+      ttlMs: 60_000,
+    });
+    await t.mutation(api.lib.update, { name: "k", metadata: { owner: "ops" } });
+    const loaded = await t.query(api.lib.get, { name: "k", now: Date.now() });
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      expect(loaded.metadata).toEqual({ owner: "ops" });
+      expect(loaded.expiresAt).toBeTypeOf("number");
+    }
+  });
+
+  test("update clears metadata and expiry with null", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      name: "k",
+      value: "v",
+      metadata: { owner: "platform" },
+      ttlMs: 60_000,
+    });
+    await t.mutation(api.lib.update, {
+      name: "k",
+      metadata: null,
+      ttlMs: null,
+    });
+    const loaded = await t.query(api.lib.get, { name: "k", now: Date.now() });
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      expect(loaded.metadata).toBeUndefined();
+      expect(loaded.expiresAt).toBeUndefined();
+    }
+  });
+
+  test("update returns updated:false for a missing secret", async () => {
+    const t = initConvexTest();
+    const result = await t.mutation(api.lib.update, {
+      name: "missing",
+      metadata: { owner: "x" },
+    });
+    expect(result).toEqual({ updated: false });
+  });
+
+  test("update with nothing to change returns updated:false", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v" });
+    const result = await t.mutation(api.lib.update, { name: "k" });
+    expect(result).toEqual({ updated: false });
+  });
+
+  test("remove deletes a secret", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v" });
+    const result = await t.mutation(api.lib.remove, { name: "k" });
+    expect(result).toEqual({ removed: true });
+
+    const loaded = await t.query(api.lib.get, { name: "k", now: Date.now() });
+    expect(loaded).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  test("remove returns removed:false for a missing secret", async () => {
+    const t = initConvexTest();
+    const result = await t.mutation(api.lib.remove, { name: "missing" });
+    expect(result).toEqual({ removed: false });
+  });
+});
