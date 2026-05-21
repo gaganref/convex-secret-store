@@ -147,3 +147,13 @@ export type ListResult<Metadata extends Record<string, unknown>> = {
 
 /** Result of `SecretStore.rotate`. */
 export type RotateResult = FunctionReturnType<ComponentApi["lib"]["rotate"]>;
+
+/** Arguments for `SecretStore.cleanupSecrets` and `SecretStore.cleanupEvents`. */
+export type CleanupArgs = {
+  retentionMs?: number;
+};
+
+/** Result of `SecretStore.cleanupSecrets` and `SecretStore.cleanupEvents`. */
+export type CleanupResult = FunctionReturnType<
+  ComponentApi["cleanup"]["cleanupSecrets"]
+>;

@@ -10,6 +10,8 @@ export type {
 } from "./errors.js";
 
 export type {
+  CleanupArgs,
+  CleanupResult,
   GetArgs,
   GetResult,
   GetSuccess,

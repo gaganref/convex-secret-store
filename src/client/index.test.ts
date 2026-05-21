@@ -192,4 +192,16 @@ describe("SecretStore facade", () => {
     expect(result.isDone).toBe(true);
     expect(await secrets.isRotationComplete(queryCtx)).toBe(true);
   });
+
+  test("cleanup runs through the facade with default retention", async () => {
+    const t = initConvexTest();
+    const { mutationCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    const secretsResult = await secrets.cleanupSecrets(mutationCtx);
+    expect(secretsResult).toEqual({ deleted: 0, isDone: true });
+
+    const eventsResult = await secrets.cleanupEvents(mutationCtx);
+    expect(eventsResult).toEqual({ deleted: 0, isDone: true });
+  });
 });

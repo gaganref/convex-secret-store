@@ -1,6 +1,8 @@
 import { ConvexError } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type {
+  CleanupArgs,
+  CleanupResult,
   GetArgs,
   GetResult,
   GetSuccess,
@@ -36,6 +38,13 @@ import type {
  * time for autocomplete and typo-catching. They are a compile-time aid only —
  * runtime storage stays a string namespace and a freeform metadata record.
  */
+
+/** Default retention before an expired secret is hard-deleted (30 days). */
+const DEFAULT_SECRET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Default retention before an audit event is hard-deleted (180 days). */
+const DEFAULT_EVENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+
 export class SecretStore<
   Namespace extends string = string,
   Metadata extends Record<string, unknown> = Record<string, unknown>,
@@ -189,5 +198,31 @@ export class SecretStore<
    */
   async isRotationComplete(ctx: RunQueryCtx): Promise<boolean> {
     return await ctx.runQuery(this.component.lib.isRotationComplete, {});
+  }
+
+  /**
+   * Hard-delete expired secrets older than the retention window (default 30
+   * days). Drains in the background; suitable for a recurring cron.
+   */
+  async cleanupSecrets(
+    ctx: RunMutationCtx,
+    args: CleanupArgs = {},
+  ): Promise<CleanupResult> {
+    return await ctx.runMutation(this.component.cleanup.cleanupSecrets, {
+      retentionMs: args.retentionMs ?? DEFAULT_SECRET_RETENTION_MS,
+    });
+  }
+
+  /**
+   * Hard-delete audit events older than the retention window (default 180
+   * days). Independent from secret cleanup; suitable for a recurring cron.
+   */
+  async cleanupEvents(
+    ctx: RunMutationCtx,
+    args: CleanupArgs = {},
+  ): Promise<CleanupResult> {
+    return await ctx.runMutation(this.component.cleanup.cleanupEvents, {
+      retentionMs: args.retentionMs ?? DEFAULT_EVENT_RETENTION_MS,
+    });
   }
 }
