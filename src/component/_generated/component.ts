@@ -54,13 +54,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         | { ok: false; reason: "not_found" | "expired" | "key_unavailable" },
         Name
       >;
-      has: FunctionReference<
-        "query",
-        "internal",
-        { name: string; namespace?: string; now: number },
-        boolean,
-        Name
-      >;
       isRotationComplete: FunctionReference<
         "query",
         "internal",
@@ -164,7 +157,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {},
-        { isDone: boolean; rotated: number },
+        { isDone: boolean; rotated: number; skipped: number },
         Name
       >;
       update: FunctionReference<

@@ -227,30 +227,6 @@ export const get = query({
   },
 });
 
-/**
- * Check whether a usable (existing, non-expired) secret is present.
- *
- * Expiry is evaluated against the caller-supplied `now` (ADR 0004).
- */
-export const has = query({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-    now: v.number(),
-  },
-  returns: v.boolean(),
-  handler: async (ctx, args) => {
-    assertValidNamespace(args.namespace);
-    assertValidName(args.name);
-    const secret = await findSecret(ctx, args.namespace, args.name);
-    return (
-      secret !== null &&
-      !isExpired(secret, args.now) &&
-      hasVersion(secret.keyVersion)
-    );
-  },
-});
-
 const listItemValidator = v.object({
   secretId: v.id("secrets"),
   namespace: v.optional(v.string()),
@@ -521,6 +497,7 @@ export const rotate = mutation({
   args: {},
   returns: v.object({
     rotated: v.number(),
+    skipped: v.number(),
     isDone: v.boolean(),
   }),
   handler: async (ctx) => {
@@ -530,8 +507,28 @@ export const rotate = mutation({
       .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
       .take(ROTATION_BATCH_SIZE);
 
+    if (stale.length === 0) {
+      return { rotated: 0, skipped: 0, isDone: true };
+    }
+
     const toKek = await getKEK(active);
+    let rotated = 0;
+    let skipped = 0;
     for (const secret of stale) {
+      if (!hasVersion(secret.keyVersion)) {
+        // Operator misconfiguration: this row was wrapped under a KEK version
+        // that's since been retired from `SECRET_STORE_KEYS`. Skip the row so
+        // one orphan doesn't poison the whole batch; surface the count via
+        // `skipped`. Recovery: re-add the missing KEK and call `rotate` again,
+        // or `remove` the orphan row.
+        console.warn(
+          `secret-store: cannot rotate secret "${secret.name}" — ` +
+            `keyVersion ${secret.keyVersion} is not configured. ` +
+            `Re-add the retired KEK or delete the row.`,
+        );
+        skipped++;
+        continue;
+      }
       const rewrapped = await rewrapDEK({
         wrappedDEK: secret.wrappedDEK,
         dekIv: secret.dekIv,
@@ -554,13 +551,17 @@ export const rotate = mutation({
         type: "rotated",
         metadata: { fromVersion: secret.keyVersion, toVersion: active },
       });
+      rotated++;
     }
 
-    const isDone = stale.length < ROTATION_BATCH_SIZE;
+    // If we couldn't make any progress this batch (only orphan rows remain),
+    // stop rescheduling — otherwise the chain spins forever. The operator
+    // must intervene (re-add the KEK or remove the orphans).
+    const isDone = stale.length < ROTATION_BATCH_SIZE || rotated === 0;
     if (!isDone) {
       await ctx.scheduler.runAfter(0, api.lib.rotate, {});
     }
-    return { rotated: stale.length, isDone };
+    return { rotated, skipped, isDone };
   },
 });
 

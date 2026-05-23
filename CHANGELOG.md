@@ -26,11 +26,12 @@
 
 - `new SecretStore<Namespace, Metadata>(components.secretStore)` — no options.
 - New: `getOrThrow`, `isRotationComplete`.
-- `has` is now expiry-aware.
 - `rotate` (was `rotateKeys`): no args, self-rescheduling, drains in the
   background. No cursor, no progress table, no CAS — see ADR 0002.
-- `get` / `has` / `list` take `now` as an arg (ADR 0004) — caller-supplied so
-  expiry verdicts are never served stale from the query cache.
+- `rotate` returns `{ rotated, skipped, isDone }` and skips orphan rows whose
+  `keyVersion` is no longer configured rather than aborting the whole batch.
+- `get` / `list` take `now` as an arg (ADR 0004) — caller-supplied so expiry
+  verdicts are never served stale from the query cache.
 - `put` recomputes expiry on every write (ADR 0003): `ttlMs ?? default ?? none`.
 - Errors standardize on `ConvexError` with a typed `data.code` and an
   `isSecretStoreError` guard.
@@ -47,6 +48,9 @@
 - The `defaults` and `logLevel` constructor options.
 - The "no backend KEKs" security claim — see ADR 0001 for the honest model.
 - 0.1.x's host-side `SecretStore` crypto and the cursor-based `rotateKeys`.
+- `has` query and facade method. Use `(await secrets.get(ctx, { name })).ok` —
+  `get` is the primitive; a derived view invited inconsistency (e.g. lying
+  when KEK material had been replaced under the same version).
 
 ### Migration
 

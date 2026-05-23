@@ -6,7 +6,6 @@ import type {
   GetArgs,
   GetResult,
   GetSuccess,
-  HasArgs,
   ListArgs,
   ListEventsArgs,
   ListEventsResult,
@@ -107,18 +106,6 @@ export class SecretStore<
     }
     const { ok: _ok, ...success } = result;
     return success;
-  }
-
-  /**
-   * Check whether a usable, non-expired secret exists. Expired secrets return
-   * `false`.
-   */
-  async has(ctx: RunQueryCtx, args: HasArgs<Namespace>): Promise<boolean> {
-    return await ctx.runQuery(this.component.lib.has, {
-      namespace: args.namespace,
-      name: args.name,
-      now: Date.now(),
-    });
   }
 
   /**

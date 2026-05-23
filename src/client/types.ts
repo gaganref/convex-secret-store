@@ -51,12 +51,6 @@ export type GetArgs<Namespace extends string> = {
   name: string;
 };
 
-/** Arguments for `SecretStore.has`. */
-export type HasArgs<Namespace extends string> = {
-  namespace?: Namespace;
-  name: string;
-};
-
 /** The decrypted payload of a successful read. */
 export type GetSuccess<Metadata extends Record<string, unknown>> = {
   value: string;

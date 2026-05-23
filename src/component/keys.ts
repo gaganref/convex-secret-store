@@ -65,6 +65,14 @@ function loadConfig(): KeyConfig {
     return configCache;
   }
 
+  // Env changed — drop all cached state *before* any parsing. Invariant: the
+  // caches either match the current env exactly, or are empty. We never want
+  // them to reflect an older valid env while the current env is malformed.
+  kekCache.clear();
+  configCache = undefined;
+  cachedRawKeys = undefined;
+  cachedRawTtl = undefined;
+
   if (rawKeys === undefined || rawKeys.trim() === "") {
     throw new ConvexError({
       code: "invalid_keys",
@@ -82,8 +90,6 @@ function loadConfig(): KeyConfig {
     });
   }
 
-  // Env changed — stale `CryptoKey`s (imported from old material) must go.
-  kekCache.clear();
   configCache = {
     byVersion: new Map(entries.map((entry) => [entry.version, entry.value])),
     activeVersion: Math.max(...entries.map((entry) => entry.version)),

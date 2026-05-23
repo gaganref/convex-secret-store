@@ -129,7 +129,7 @@ describe("example app", () => {
       value: "v",
     });
     const result = await t.mutation(api.example.runRotation, {});
-    expect(result).toEqual({ rotated: 0, isDone: true });
+    expect(result).toEqual({ rotated: 0, skipped: 0, isDone: true });
   });
 
   test("runCleanup and runEventCleanup remove expired data", async () => {

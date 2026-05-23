@@ -213,17 +213,8 @@ await secrets.getOrThrow(ctx, { namespace?, name });
 
 Convenience for call sites that treat any failure as exceptional.
 
-### `has`
-
-```ts
-await secrets.has(ctx, { namespace?, name });
-// → boolean (false for missing, expired, or key_unavailable)
-```
-
-Returns `false` when the row's `keyVersion` is no longer configured — the
-secret exists but cannot be decrypted, so it is not "usable." Use
-[`listEvents`](#listevents) or [`list`](#list) (which surface `keyVersion`
-explicitly) if you need to distinguish absence from key retirement.
+> No dedicated `has` is exposed. For "does X exist?" checks, derive from `get`:
+> `const present = (await secrets.get(ctx, { name })).ok`.
 
 ### `update`
 
@@ -281,12 +272,18 @@ and `type` cannot combine with each other.
 
 ```ts
 await secrets.rotate(ctx);
-// → { rotated, isDone }
+// → { rotated, skipped, isDone }
 ```
 
 Rewraps each stale secret's DEK onto the active KEK version, in batches of 100
 per transaction, **self-rescheduling** until the backlog drains. The secret
 plaintext is never rewritten. Safe to call repeatedly.
+
+`skipped` counts rows that reference a `keyVersion` no longer in
+`SECRET_STORE_KEYS` — orphans from retiring a KEK too soon. They're left
+untouched and logged. The chain stops rescheduling once only orphans remain
+(otherwise it would spin); recover by re-adding the missing KEK and calling
+`rotate` again, or by `remove`ing the orphan rows.
 
 ### `isRotationComplete`
 

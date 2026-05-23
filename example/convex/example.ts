@@ -203,6 +203,7 @@ export const runRotation = mutation({
   args: {},
   returns: {
     rotated: v.number(),
+    skipped: v.number(),
     isDone: v.boolean(),
   },
   handler: async (ctx) => {
@@ -257,8 +258,8 @@ export const seedDemoData = mutation({
 
     let seeded = 0;
     for (const demo of demoSecrets) {
-      const exists = await secrets.has(ctx, { namespace, name: demo.name });
-      if (!exists) {
+      const existing = await secrets.get(ctx, { namespace, name: demo.name });
+      if (!existing.ok) {
         await secrets.put(ctx, {
           namespace,
           name: demo.name,

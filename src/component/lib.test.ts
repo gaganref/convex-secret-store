@@ -180,41 +180,6 @@ describe("component lib — put, get, has", () => {
     expect(result).toEqual({ ok: false, reason: "expired" });
   });
 
-  test("has reflects presence and expiry", async () => {
-    const t = initConvexTest();
-    await t.mutation(api.lib.put, { name: "live", value: "v", ttlMs: 1_000 });
-    expect(
-      await t.query(api.lib.has, { name: "live", now: Date.now() }),
-    ).toBe(true);
-    expect(
-      await t.query(api.lib.has, { name: "missing", now: Date.now() }),
-    ).toBe(false);
-    expect(
-      await t.query(api.lib.has, {
-        name: "live",
-        now: Date.now() + 10_000_000,
-      }),
-    ).toBe(false);
-  });
-
-  test("has returns false when the row's keyVersion is no longer configured", async () => {
-    const t = initConvexTest();
-    await t.run(async (ctx) => {
-      await ctx.db.insert("secrets", {
-        name: "legacy",
-        encryptedValue: "x",
-        iv: "x",
-        wrappedDEK: "x",
-        dekIv: "x",
-        keyVersion: 999,
-        updatedAt: Date.now(),
-      });
-    });
-    expect(
-      await t.query(api.lib.has, { name: "legacy", now: Date.now() }),
-    ).toBe(false);
-  });
-
   test("ttlMs omitted uses the configured default TTL", async () => {
     process.env.SECRET_STORE_DEFAULT_TTL_MS = "60000";
     resetKeyConfig();
@@ -645,7 +610,7 @@ describe("component lib — rotation", () => {
 
     expect(await t.query(api.lib.isRotationComplete, {})).toBe(false);
     const result = await t.mutation(api.lib.rotate, {});
-    expect(result).toEqual({ rotated: 1, isDone: true });
+    expect(result).toEqual({ rotated: 1, skipped: 0, isDone: true });
     expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
 
     const loaded = await t.query(api.lib.get, { name: "k", now: Date.now() });
@@ -676,7 +641,26 @@ describe("component lib — rotation", () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "k", value: "v" });
     const result = await t.mutation(api.lib.rotate, {});
-    expect(result).toEqual({ rotated: 0, isDone: true });
+    expect(result).toEqual({ rotated: 0, skipped: 0, isDone: true });
+  });
+
+  test("rotate skips orphan rows whose keyVersion has been retired", async () => {
+    const t = initConvexTest();
+    // Start at v1, write a secret, then move active to v2 and retire v1
+    // entirely. The row's `keyVersion` (1) is now not configured anywhere.
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 2: RAW_V2 });
+
+    const result = await t.mutation(api.lib.rotate, {});
+    expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
+
+    // Row left untouched — still on its retired keyVersion.
+    const row = await t.run((ctx) => ctx.db.get(created.secretId));
+    expect(row?.keyVersion).toBe(1);
   });
 
   test("isRotationComplete is true for an empty store", async () => {

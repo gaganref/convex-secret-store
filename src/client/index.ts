@@ -15,7 +15,6 @@ export type {
   GetArgs,
   GetResult,
   GetSuccess,
-  HasArgs,
   ListArgs,
   ListEventsArgs,
   ListEventsResult,

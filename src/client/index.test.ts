@@ -89,14 +89,14 @@ describe("SecretStore facade", () => {
     }
   });
 
-  test("has reports presence through the facade", async () => {
+  test("get.ok reports presence through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
     const secrets = new SecretStore(components.secretStore);
 
-    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(false);
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(false);
     await secrets.put(mutationCtx, { name: "openai", value: "sk" });
-    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(true);
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(true);
   });
 
   test("isSecretStoreError narrows a secret-store ConvexError", async () => {
@@ -134,7 +134,7 @@ describe("SecretStore facade", () => {
 
     const removed = await secrets.remove(mutationCtx, { name: "openai" });
     expect(removed).toEqual({ removed: true });
-    expect(await secrets.has(queryCtx, { name: "openai" })).toBe(false);
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(false);
   });
 
   test("listEvents paginates audit events through the facade", async () => {
