@@ -30,6 +30,14 @@ describe("resolveExpiresAt", () => {
     expect(() => resolveExpiresAt(1000, -1, null)).toThrow();
   });
 
+  test("rejects a zero ttlMs", () => {
+    expect(() => resolveExpiresAt(1000, 0, null)).toThrow();
+  });
+
+  test("rejects a zero default ttlMs when ttlMs is omitted", () => {
+    expect(() => resolveExpiresAt(1000, undefined, 0)).toThrow();
+  });
+
   test("rejects a non-integer ttlMs", () => {
     expect(() => resolveExpiresAt(1000, 1.5, null)).toThrow();
   });

@@ -72,6 +72,12 @@ describe("component key configuration", () => {
     expect(() => defaultTtlMs()).toThrow();
   });
 
+  test("rejects a zero default TTL", () => {
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    process.env.SECRET_STORE_DEFAULT_TTL_MS = "0";
+    expect(() => defaultTtlMs()).toThrow();
+  });
+
   test("picks up a SECRET_STORE_KEYS change between calls without resetKeyConfig", () => {
     process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     expect(activeVersion()).toBe(1);
