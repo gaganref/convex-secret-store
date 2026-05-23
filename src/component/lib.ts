@@ -88,6 +88,9 @@ export const put = mutation({
       });
     }
 
+    const now = Date.now();
+    const expiresAt = resolveExpiresAt(now, args.ttlMs, defaultTtlMs());
+
     const keyVersion = activeVersion();
     const payload = await encryptSecret({
       value: args.value,
@@ -96,8 +99,6 @@ export const put = mutation({
       keyVersion,
       kek: await getKEK(keyVersion),
     });
-    const now = Date.now();
-    const expiresAt = resolveExpiresAt(now, args.ttlMs, defaultTtlMs());
     const existing = await findSecret(ctx, args.namespace, args.name);
 
     if (existing === null) {

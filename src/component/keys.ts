@@ -125,6 +125,10 @@ export function getKEK(version: number): Promise<CryptoKey> {
   let imported = kekCache.get(version);
   if (imported === undefined) {
     imported = importKey(material);
+    // Evict on rejection so a transient `importKey` failure doesn't poison the
+    // cache. The original promise is still what we store and return — this
+    // `.catch` is a side-channel that doesn't swallow the rejection.
+    imported.catch(() => kekCache.delete(version));
     kekCache.set(version, imported);
   }
   return imported;

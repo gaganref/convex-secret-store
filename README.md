@@ -475,6 +475,10 @@ against any actor with deployment access:
   relocated between rows.
 - **Plaintext metadata.** `metadata`, `namespace`, `name`, expiry, and audit
   events are not encrypted. Do not store sensitive data in metadata.
+- **Audit events are advisory, not tamper-evident.** Events live in the same
+  database as the secrets and have no append-only enforcement; treat them as a
+  forensic trail visible to anyone with deployment access, not as evidence of
+  record.
 
 See `docs/adr/0001-component-side-encryption.md` for the architecture trade-off.
 
