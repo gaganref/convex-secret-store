@@ -99,24 +99,49 @@ export type PaginationOptions = {
   cursor: string | null;
 };
 
-/**
- * Arguments for `SecretStore.listEvents`.
- *
- * Filter by `secretId`, or by `namespace` optionally narrowed with `name` or
- * `type` — the two forms are mutually exclusive.
- */
-export type ListEventsArgs<Namespace extends string> = {
+type ListEventsBase = {
   paginationOpts: PaginationOptions;
   order?: "asc" | "desc";
-} & (
-  | { secretId: SecretId; namespace?: never; name?: never; type?: never }
-  | {
-      secretId?: never;
+};
+
+/**
+ * Arguments for `SecretStore.listEvents`. A discriminated union that mirrors
+ * the runtime constraints:
+ *
+ * - `secretId` alone — no other filter may combine with it.
+ * - `namespace` alone (or omitted, meaning the default namespace).
+ * - `namespace + name` — events for one secret name in a namespace.
+ * - `namespace + type` — events of one type in a namespace.
+ *
+ * In all `namespace`-filtered variants, omitting `namespace` means the default
+ * namespace (matching the rest of the API). `name` and `type` cannot combine,
+ * and neither can mix with `secretId`.
+ */
+export type ListEventsArgs<Namespace extends string> =
+  | (ListEventsBase & {
+      secretId: SecretId;
+      namespace?: never;
+      name?: never;
+      type?: never;
+    })
+  | (ListEventsBase & {
       namespace?: Namespace;
-      name?: string;
-      type?: SecretEventType;
-    }
-);
+      name?: never;
+      type?: never;
+      secretId?: never;
+    })
+  | (ListEventsBase & {
+      namespace?: Namespace;
+      name: string;
+      type?: never;
+      secretId?: never;
+    })
+  | (ListEventsBase & {
+      namespace?: Namespace;
+      type: SecretEventType;
+      name?: never;
+      secretId?: never;
+    });
 
 /** Result of `SecretStore.listEvents`. */
 export type ListEventsResult = FunctionReturnType<

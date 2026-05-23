@@ -217,8 +217,13 @@ Convenience for call sites that treat any failure as exceptional.
 
 ```ts
 await secrets.has(ctx, { namespace?, name });
-// → boolean (false for missing or expired)
+// → boolean (false for missing, expired, or key_unavailable)
 ```
+
+Returns `false` when the row's `keyVersion` is no longer configured — the
+secret exists but cannot be decrypted, so it is not "usable." Use
+[`listEvents`](#listevents) or [`list`](#list) (which surface `keyVersion`
+explicitly) if you need to distinguish absence from key retirement.
 
 ### `update`
 

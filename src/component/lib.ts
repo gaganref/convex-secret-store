@@ -29,6 +29,15 @@ function assertValidNamespace(namespace: string | undefined): void {
   }
 }
 
+function assertValidName(name: string): void {
+  if (name.trim() === "") {
+    throw new ConvexError({
+      code: "invalid_argument",
+      message: "name must not be empty",
+    });
+  }
+}
+
 async function findSecret(
   ctx: QueryCtx | MutationCtx,
   namespace: string | undefined,
@@ -71,6 +80,7 @@ export const put = mutation({
   }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    assertValidName(args.name);
     if (byteCounter.encode(args.value).byteLength > MAX_VALUE_BYTES) {
       throw new ConvexError({
         code: "value_too_large",
@@ -175,6 +185,7 @@ export const get = query({
   ),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    assertValidName(args.name);
     const secret = await findSecret(ctx, args.namespace, args.name);
     if (secret === null) {
       return { ok: false as const, reason: "not_found" as const };
@@ -229,8 +240,13 @@ export const has = query({
   returns: v.boolean(),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    assertValidName(args.name);
     const secret = await findSecret(ctx, args.namespace, args.name);
-    return secret !== null && !isExpired(secret, args.now);
+    return (
+      secret !== null &&
+      !isExpired(secret, args.now) &&
+      hasVersion(secret.keyVersion)
+    );
   },
 });
 
@@ -317,6 +333,7 @@ export const update = mutation({
   }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    assertValidName(args.name);
     if (args.metadata === undefined && args.ttlMs === undefined) {
       return { updated: false as const };
     }
@@ -370,6 +387,7 @@ export const remove = mutation({
   returns: v.object({ removed: v.boolean() }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    assertValidName(args.name);
     const secret = await findSecret(ctx, args.namespace, args.name);
     if (secret === null) {
       return { removed: false };
@@ -419,6 +437,9 @@ export const listEvents = query({
   }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
+    if (args.name !== undefined) {
+      assertValidName(args.name);
+    }
     const { secretId, namespace, name, type } = args;
 
     if (
@@ -434,12 +455,6 @@ export const listEvents = query({
       throw new ConvexError({
         code: "invalid_argument",
         message: "name and type cannot be combined",
-      });
-    }
-    if ((name !== undefined || type !== undefined) && namespace === undefined) {
-      throw new ConvexError({
-        code: "invalid_argument",
-        message: "namespace is required when filtering by name or type",
       });
     }
 
@@ -558,10 +573,18 @@ export const isRotationComplete = query({
   returns: v.boolean(),
   handler: async (ctx) => {
     const active = activeVersion();
-    const stale = await ctx.db
+    // Rotation is complete only when every row is on the active version.
+    // We check both directions because retiring the *highest* configured key
+    // (a misconfiguration) would leave rows with `keyVersion > active`.
+    const below = await ctx.db
       .query("secrets")
       .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
       .first();
-    return stale === null;
+    if (below !== null) return false;
+    const above = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.gt("keyVersion", active))
+      .first();
+    return above === null;
   },
 });

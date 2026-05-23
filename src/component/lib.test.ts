@@ -124,6 +124,23 @@ describe("component lib — put, get, has", () => {
     ).rejects.toThrow();
   });
 
+  test("put rejects an empty name", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.mutation(api.lib.put, { name: "", value: "v" }),
+    ).rejects.toThrow();
+    await expect(
+      t.mutation(api.lib.put, { name: "   ", value: "v" }),
+    ).rejects.toThrow();
+  });
+
+  test("get rejects an empty name", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.query(api.lib.get, { name: "", now: Date.now() }),
+    ).rejects.toThrow();
+  });
+
   test("put rejects a value over the 64 KiB limit", async () => {
     const t = initConvexTest();
     await expect(
@@ -177,6 +194,24 @@ describe("component lib — put, get, has", () => {
         name: "live",
         now: Date.now() + 10_000_000,
       }),
+    ).toBe(false);
+  });
+
+  test("has returns false when the row's keyVersion is no longer configured", async () => {
+    const t = initConvexTest();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("secrets", {
+        name: "legacy",
+        encryptedValue: "x",
+        iv: "x",
+        wrappedDEK: "x",
+        dekIv: "x",
+        keyVersion: 999,
+        updatedAt: Date.now(),
+      });
+    });
+    expect(
+      await t.query(api.lib.has, { name: "legacy", now: Date.now() }),
     ).toBe(false);
   });
 
@@ -465,14 +500,30 @@ describe("component lib — audit events", () => {
     ).rejects.toThrow();
   });
 
-  test("listEvents rejects name without namespace", async () => {
+  test("listEvents filters by name in the default namespace (no namespace arg)", async () => {
     const t = initConvexTest();
-    await expect(
-      t.query(api.lib.listEvents, {
-        name: "k",
-        paginationOpts: { numItems: 10, cursor: null },
-      }),
-    ).rejects.toThrow();
+    await t.mutation(api.lib.put, { name: "openai", value: "v" });
+    await t.mutation(api.lib.put, { name: "stripe", value: "v" });
+    const events = await t.query(api.lib.listEvents, {
+      name: "openai",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.name).toBe("openai");
+    expect(events.page[0]?.namespace).toBeUndefined();
+  });
+
+  test("listEvents filters by type in the default namespace (no namespace arg)", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, { name: "k", value: "v1" });
+    await t.mutation(api.lib.put, { name: "k", value: "v2" });
+    const events = await t.query(api.lib.listEvents, {
+      type: "updated",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(events.page).toHaveLength(1);
+    expect(events.page[0]?.type).toBe("updated");
+    expect(events.page[0]?.namespace).toBeUndefined();
   });
 });
 
@@ -631,5 +682,23 @@ describe("component lib — rotation", () => {
   test("isRotationComplete is true for an empty store", async () => {
     const t = initConvexTest();
     expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
+  });
+
+  test("isRotationComplete returns false when a row sits above the active version", async () => {
+    const t = initConvexTest();
+    // beforeEach configures active = 1. Insert a row at version 99 — a row
+    // that could arise if an operator retired the highest configured key.
+    await t.run(async (ctx) => {
+      await ctx.db.insert("secrets", {
+        name: "future",
+        encryptedValue: "x",
+        iv: "x",
+        wrappedDEK: "x",
+        dekIv: "x",
+        keyVersion: 99,
+        updatedAt: Date.now(),
+      });
+    });
+    expect(await t.query(api.lib.isRotationComplete, {})).toBe(false);
   });
 });

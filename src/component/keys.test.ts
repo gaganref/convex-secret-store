@@ -71,4 +71,32 @@ describe("component key configuration", () => {
     process.env.SECRET_STORE_DEFAULT_TTL_MS = "abc";
     expect(() => defaultTtlMs()).toThrow();
   });
+
+  test("picks up a SECRET_STORE_KEYS change between calls without resetKeyConfig", () => {
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    expect(activeVersion()).toBe(1);
+
+    process.env.SECRET_STORE_KEYS = defineKeys({ 5: RAW_V2 });
+    expect(activeVersion()).toBe(5);
+  });
+
+  test("picks up a SECRET_STORE_DEFAULT_TTL_MS change between calls", () => {
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    process.env.SECRET_STORE_DEFAULT_TTL_MS = "60000";
+    expect(defaultTtlMs()).toBe(60000);
+
+    process.env.SECRET_STORE_DEFAULT_TTL_MS = "120000";
+    expect(defaultTtlMs()).toBe(120000);
+  });
+
+  test("getKEK re-imports after the SECRET_STORE_KEYS material changes", async () => {
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    const firstKek = await getKEK(1);
+    expect(firstKek).toBeDefined();
+
+    // Rotate the material for version 1 in-place — kekCache must invalidate.
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V2 });
+    const secondKek = await getKEK(1);
+    expect(secondKek).not.toBe(firstKek);
+  });
 });
