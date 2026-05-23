@@ -22,26 +22,26 @@ afterEach(clearEnv);
 
 describe("component key configuration", () => {
   test("active version is the highest configured version", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([
-      { version: 1, value: RAW_V1 },
-      { version: 5, value: RAW_V2 },
-    ]);
+    process.env.SECRET_STORE_KEYS = defineKeys({
+      1: RAW_V1,
+      5: RAW_V2,
+    });
     expect(activeVersion()).toBe(5);
   });
 
   test("hasVersion reflects configured versions", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 3, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 3: RAW_V1 });
     expect(hasVersion(3)).toBe(true);
     expect(hasVersion(4)).toBe(false);
   });
 
   test("getKEK throws for an unconfigured version", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     expect(() => getKEK(2)).toThrow();
   });
 
   test("getKEK imports a configured KEK", async () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     const kek = await getKEK(1);
     expect(kek).toBeDefined();
   });
@@ -56,18 +56,18 @@ describe("component key configuration", () => {
   });
 
   test("defaultTtlMs parses a configured value", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     process.env.SECRET_STORE_DEFAULT_TTL_MS = "60000";
     expect(defaultTtlMs()).toBe(60000);
   });
 
   test("defaultTtlMs is null when unset", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     expect(defaultTtlMs()).toBeNull();
   });
 
   test("rejects a non-integer default TTL", () => {
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     process.env.SECRET_STORE_DEFAULT_TTL_MS = "abc";
     expect(() => defaultTtlMs()).toThrow();
   });

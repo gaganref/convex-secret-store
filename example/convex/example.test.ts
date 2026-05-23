@@ -10,7 +10,7 @@ describe("example app", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetKeyConfig();
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
   });
 
   afterEach(() => {

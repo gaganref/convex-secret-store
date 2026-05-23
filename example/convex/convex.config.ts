@@ -23,9 +23,10 @@ const app = defineApp({
 
 app.use(secretStore, {
   env: {
-    SECRET_STORE_KEYS: defineKeys([
-      { version: 1, value: process.env.MY_APP_KEK_V1! },
-    ]),
+    SECRET_STORE_KEYS: defineKeys({
+      1: process.env.MY_APP_KEK_V1!,
+      2: process.env.MY_APP_KEK_V2!,
+    }),
   },
 });
 

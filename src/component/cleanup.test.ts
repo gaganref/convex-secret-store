@@ -9,7 +9,7 @@ const DAY = 24 * 60 * 60 * 1000;
 
 beforeEach(() => {
   resetKeyConfig();
-  process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+  process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
 });
 
 afterEach(() => {

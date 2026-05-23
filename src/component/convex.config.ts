@@ -14,9 +14,9 @@ import { v } from "convex/values";
  *
  * app.use(secretStore, {
  *   env: {
- *     SECRET_STORE_KEYS: defineKeys([
- *       { version: 1, value: process.env.KEK_V1! },
- *     ]),
+ *     SECRET_STORE_KEYS: defineKeys({
+ *       1: process.env.KEK_V1!,
+ *     }),
  *   },
  * });
  * ```

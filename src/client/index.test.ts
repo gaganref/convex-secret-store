@@ -10,7 +10,7 @@ const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 
 beforeEach(() => {
   resetKeyConfig();
-  process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+  process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
 });
 
 afterEach(() => {
@@ -179,14 +179,14 @@ describe("SecretStore facade", () => {
     const secrets = new SecretStore(components.secretStore);
 
     resetKeyConfig();
-    process.env.SECRET_STORE_KEYS = defineKeys([{ version: 1, value: RAW_V1 }]);
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
     await secrets.put(mutationCtx, { name: "k", value: "v" });
 
     resetKeyConfig();
-    process.env.SECRET_STORE_KEYS = defineKeys([
-      { version: 1, value: RAW_V1 },
-      { version: 2, value: RAW_V2 },
-    ]);
+    process.env.SECRET_STORE_KEYS = defineKeys({
+      1: RAW_V1,
+      2: RAW_V2,
+    });
     expect(await secrets.isRotationComplete(queryCtx)).toBe(false);
     const result = await secrets.rotate(mutationCtx);
     expect(result.isDone).toBe(true);
