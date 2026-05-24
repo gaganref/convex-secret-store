@@ -1,29 +1,11 @@
+import { ConvexError } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
-import {
-  decryptSecret,
-  encryptSecret,
-  importKey,
-  rewrapDEK,
-} from "./crypto.js";
-import {
-  invalidArgumentError,
-  keyVersionUnavailableError,
-  operationFailedError,
-} from "./errors.js";
-import {
-  assertNullableNonNegativeInteger,
-  normalizeSecretStoreOptions,
-  type NormalizedSecretStoreOptions,
-  type SecretStoreOptions,
-} from "./options.js";
 import type {
-  CleanupEventsArgs,
-  CleanupEventsResult,
-  CleanupSecretsArgs,
-  CleanupSecretsResult,
+  CleanupArgs,
+  CleanupResult,
   GetArgs,
   GetResult,
-  HasArgs,
+  GetSuccess,
   ListArgs,
   ListEventsArgs,
   ListEventsResult,
@@ -32,482 +14,205 @@ import type {
   PutResult,
   RemoveArgs,
   RemoveResult,
-  RotateKeysArgs,
-  RotateKeysResult,
+  RotateResult,
   RunMutationCtx,
   RunQueryCtx,
   UpdateArgs,
   UpdateResult,
-  SecretStoreTypeOptions,
 } from "./types.js";
 
-const DEFAULT_ROTATION_BATCH_SIZE = 100;
+/**
+ * A typed, host-side facade over a mounted secret store component.
+ *
+ * Construct one shared instance and re-export it from your Convex code:
+ *
+ * ```ts
+ * import { SecretStore } from "convex-secret-store";
+ * import { components } from "./_generated/api.js";
+ *
+ * export const secrets = new SecretStore(components.secretStore);
+ * ```
+ *
+ * The optional type parameters constrain `namespace` and `metadata` at compile
+ * time for autocomplete and typo-catching. They are a compile-time aid only —
+ * runtime storage stays a string namespace and a freeform metadata record.
+ */
+
+/** Default retention before an expired secret is hard-deleted (30 days). */
 const DEFAULT_SECRET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Default retention before an audit event is hard-deleted (180 days). */
 const DEFAULT_EVENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
-function readNamespace(args: object): string | undefined {
-  if (!("namespace" in args)) {
-    return undefined;
-  }
-  const namespace = (args as { namespace?: unknown }).namespace;
-  if (namespace === undefined) {
-    return undefined;
-  }
-  if (typeof namespace !== "string") {
-    return undefined;
-  }
-  if (namespace.length === 0) {
-    throw invalidArgumentError("namespace must not be empty");
-  }
-  return namespace;
-}
-
-function shouldLog(
-  configured: "debug" | "warn" | "error" | "none",
-  level: "debug" | "warn" | "error",
-): boolean {
-  if (configured === "none") return false;
-  if (configured === "debug") return true;
-  if (configured === "warn") return level !== "debug";
-  return level === "error";
-}
-
-function logWithLevel(
-  configured: "debug" | "warn" | "error" | "none",
-  level: "debug" | "warn" | "error",
-  tag: string,
-  data: Record<string, unknown>,
-) {
-  if (!shouldLog(configured, level)) {
-    return;
-  }
-  const method =
-    level === "error" ? "error" : level === "warn" ? "warn" : "log";
-  console[method](`[secret-store:${tag}]`, data);
-}
-
-function resolvePutExpiresAt(
-  now: number,
-  ttlMs: number | null | undefined,
-  defaultTtlMs: number | null,
-) {
-  const resolved = ttlMs === undefined ? defaultTtlMs : ttlMs;
-  if (resolved === null) {
-    return null;
-  }
-  assertNullableNonNegativeInteger(resolved, "ttlMs");
-  return now + resolved;
-}
-
-function toThrownError(error: unknown, message: string) {
-  return operationFailedError(message, error);
-}
-
 export class SecretStore<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
+  Namespace extends string = string,
+  Metadata extends Record<string, unknown> = Record<string, unknown>,
 > {
-  public readonly component: ComponentApi;
-  public readonly options: NormalizedSecretStoreOptions;
-  private readonly kekCache = new Map<number, Promise<CryptoKey>>();
+  constructor(public readonly component: ComponentApi) {}
 
   /**
-   * Create a typed SecretStore client for a mounted component instance.
+   * Encrypt and store a secret value, upserting by `namespace + name`.
    *
-   * `keys` must contain one or more versioned KEKs. The first entry is the
-   * active key used for new writes; later entries are decrypt-only keys used to
-   * read older rows and rotate them forward.
+   * Expiry is recomputed on every write: `ttlMs` if given, else the configured
+   * default, else none; pass `ttlMs: null` for no expiry. On overwrite, omitted
+   * `metadata` is preserved; pass `null` to clear it.
    */
-  constructor(component: ComponentApi, options: SecretStoreOptions<TOptions>) {
-    this.component = component;
-    this.options = normalizeSecretStoreOptions(
-      options as SecretStoreOptions<SecretStoreTypeOptions>,
-    );
-  }
-
-  private getKEK(version: number): Promise<CryptoKey> {
-    const raw = this.options.keyVersions.get(version);
-    if (raw === undefined) {
-      throw keyVersionUnavailableError(version);
-    }
-    const cached = this.kekCache.get(version);
-    if (cached) {
-      return cached;
-    }
-    const imported = importKey(raw);
-    this.kekCache.set(version, imported);
-    return imported;
-  }
-
-  /**
-   * Encrypt and store a secret value.
-   *
-   * The plaintext is encrypted client-side with a fresh DEK, that DEK is wrapped
-   * with the active KEK, and only ciphertext fields are persisted in Convex.
-   * When a secret with the same `namespace + name` already exists, the row is
-   * replaced in place and an `updated` audit event is written.
-   */
-  async put(ctx: RunMutationCtx, args: PutArgs<TOptions>): Promise<PutResult> {
-    const now = Date.now();
-    const namespace = readNamespace(args);
-
-    try {
-      const expiresAt = resolvePutExpiresAt(
-        now,
-        args.ttlMs,
-        this.options.defaults.ttlMs,
-      );
-      const payload = await encryptSecret({
-        value: args.value,
-        namespace,
-        name: args.name,
-        keyVersion: this.options.activeVersion,
-        kek: await this.getKEK(this.options.activeVersion),
-      });
-
-      const result = await ctx.runMutation(this.component.lib.put, {
-        namespace,
-        name: args.name,
-        metadata: args.metadata,
-        expiresAt,
-        keyVersion: this.options.activeVersion,
-        ...payload,
-      });
-      logWithLevel(this.options.logLevel, "debug", "put", {
-        namespace,
-        name: args.name,
-        secretId: result.secretId,
-        isNew: result.isNew,
-      });
-      return result;
-    } catch (error) {
-      throw toThrownError(error, `put ${args.name}`);
-    }
+  async put(
+    ctx: RunMutationCtx,
+    args: PutArgs<Namespace, Metadata>,
+  ): Promise<PutResult> {
+    return await ctx.runMutation(this.component.lib.put, {
+      namespace: args.namespace,
+      name: args.name,
+      value: args.value,
+      metadata: args.metadata,
+      ttlMs: args.ttlMs,
+    });
   }
 
   /**
    * Load and decrypt a secret value.
    *
-   * Returns `not_found` or `expired` when the backend row is unavailable for
-   * use. Returns `key_version_unavailable` when the row exists but the current
-   * runtime is missing the KEK version required to unwrap it.
+   * Returns a discriminated result: `{ ok: true, value, ... }` on success, or
+   * `{ ok: false, reason }` when the secret is missing, expired, or its key
+   * version is no longer configured.
    */
   async get(
     ctx: RunQueryCtx,
-    args: GetArgs<TOptions>,
-  ): Promise<GetResult<TOptions>> {
-    const namespace = readNamespace(args);
-
-    try {
-      const result = await ctx.runQuery(this.component.lib.get, {
-        namespace,
-        name: args.name,
-        now: Date.now(),
-      });
-      if (!result.ok) {
-        return result;
-      }
-
-      const key = this.options.keyVersions.get(result.keyVersion);
-      if (key === undefined) {
-        return { ok: false, reason: "key_version_unavailable" };
-      }
-
-      const value = await decryptSecret({
-        namespace,
-        name: args.name,
-        encryptedValue: result.encryptedValue,
-        iv: result.iv,
-        wrappedDEK: result.wrappedDEK,
-        dekIv: result.dekIv,
-        keyVersion: result.keyVersion,
-        kek: await this.getKEK(result.keyVersion),
-      });
-
-      return {
-        ok: true,
-        value,
-        metadata: result.metadata as GetResult<TOptions> extends {
-          ok: true;
-          metadata: infer M;
-        }
-          ? M
-          : never,
-        expiresAt: result.expiresAt,
-        updatedAt: result.updatedAt,
-      };
-    } catch (error) {
-      throw toThrownError(error, `get ${args.name}`);
-    }
+    args: GetArgs<Namespace>,
+  ): Promise<GetResult<Metadata>> {
+    return (await ctx.runQuery(this.component.lib.get, {
+      namespace: args.namespace,
+      name: args.name,
+      now: Date.now(),
+    })) as GetResult<Metadata>;
   }
 
   /**
-   * Check whether a usable secret exists.
-   *
-   * This is an expiry-aware existence check: expired rows return `false`.
+   * Like `get`, but throws a `ConvexError` instead of returning a failure
+   * result. Use it at call sites that treat a missing or expired secret as an
+   * error.
    */
-  async has(ctx: RunQueryCtx, args: HasArgs<TOptions>): Promise<boolean> {
-    try {
-      return await ctx.runQuery(this.component.lib.has, {
-        namespace: readNamespace(args),
-        name: args.name,
-        now: Date.now(),
+  async getOrThrow(
+    ctx: RunQueryCtx,
+    args: GetArgs<Namespace>,
+  ): Promise<GetSuccess<Metadata>> {
+    const result = await this.get(ctx, args);
+    if (!result.ok) {
+      throw new ConvexError({
+        code: result.reason,
+        message: `secret "${args.name}" is unavailable: ${result.reason}`,
       });
-    } catch (error) {
-      throw toThrownError(error, `has ${args.name}`);
     }
-  }
-
-  async remove(
-    ctx: RunMutationCtx,
-    args: RemoveArgs<TOptions>,
-  ): Promise<RemoveResult> {
-    try {
-      return await ctx.runMutation(this.component.lib.remove, {
-        namespace: readNamespace(args),
-        name: args.name,
-      });
-    } catch (error) {
-      throw toThrownError(error, `remove ${args.name}`);
-    }
+    const { ok: _ok, ...success } = result;
+    return success;
   }
 
   /**
-   * Update plaintext metadata or expiry without rewriting encrypted value bytes.
-   *
-   * Pass `null` for `metadata` or `expiresAt` to remove those fields entirely.
-   */
-  async update(
-    ctx: RunMutationCtx,
-    args: UpdateArgs<TOptions>,
-  ): Promise<UpdateResult> {
-    assertNullableNonNegativeInteger(args.expiresAt, "expiresAt");
-
-    try {
-      return await ctx.runMutation(this.component.lib.update, {
-        namespace: readNamespace(args),
-        name: args.name,
-        metadata: args.metadata,
-        expiresAt: args.expiresAt,
-      });
-    } catch (error) {
-      throw toThrownError(error, `update ${args.name}`);
-    }
-  }
-
-  /**
-   * List secrets in one namespace.
-   *
-   * Results are ordered by `updatedAt` and include `effectiveState` so callers
-   * can distinguish active and expired rows without additional filtering.
+   * Paginate secrets in a namespace, newest-updated first. Each row carries
+   * `effectiveState`; the decrypted value is never included.
    */
   async list(
     ctx: RunQueryCtx,
-    args: ListArgs<TOptions>,
-  ): Promise<ListResult<TOptions>> {
-    try {
-      return (await ctx.runQuery(this.component.lib.list, {
-        namespace: readNamespace(args),
-        paginationOpts: args.paginationOpts,
-        order: args.order,
-        now: Date.now(),
-      })) as ListResult<TOptions>;
-    } catch (error) {
-      throw toThrownError(error, "list secrets");
-    }
+    args: ListArgs<Namespace>,
+  ): Promise<ListResult<Metadata>> {
+    return (await ctx.runQuery(this.component.lib.list, {
+      namespace: args.namespace,
+      paginationOpts: args.paginationOpts,
+      order: args.order,
+      now: Date.now(),
+    })) as ListResult<Metadata>;
   }
 
   /**
-   * List audit events for a namespace or one specific secret.
-   *
-   * In V1, `name` and `type` cannot be combined in the same query. When using a
-   * namespaced client, normal event listing requires `namespace`; the only
-   * namespace-less variant is a direct `secretId` lookup.
+   * Update a secret's metadata or expiry without re-encrypting its value.
+   * Omitted fields are preserved; pass `null` to clear. At least one of
+   * `metadata` or `ttlMs` must be supplied — calling with neither throws
+   * `invalid_argument`. `{ updated: false }` means the secret does not exist.
+   */
+  async update(
+    ctx: RunMutationCtx,
+    args: UpdateArgs<Namespace, Metadata>,
+  ): Promise<UpdateResult> {
+    return await ctx.runMutation(this.component.lib.update, {
+      namespace: args.namespace,
+      name: args.name,
+      metadata: args.metadata,
+      ttlMs: args.ttlMs,
+    });
+  }
+
+  /** Delete a secret. Returns `removed: false` when it does not exist. */
+  async remove(
+    ctx: RunMutationCtx,
+    args: RemoveArgs<Namespace>,
+  ): Promise<RemoveResult> {
+    return await ctx.runMutation(this.component.lib.remove, {
+      namespace: args.namespace,
+      name: args.name,
+    });
+  }
+
+  /**
+   * Paginate audit events — by `secretId`, or by `namespace` optionally
+   * narrowed with `name` or `type`.
    */
   async listEvents(
     ctx: RunQueryCtx,
-    args: ListEventsArgs<TOptions>,
-  ): Promise<ListEventsResult<TOptions>> {
-    if (args.name !== undefined && args.type !== undefined) {
-      throw invalidArgumentError(
-        "listEvents does not support name + type in V1",
-      );
-    }
-
-    try {
-      return (await ctx.runQuery(this.component.lib.listEvents, {
-        namespace: readNamespace(args),
-        secretId: args.secretId,
-        name: args.name,
-        type: args.type,
-        paginationOpts: args.paginationOpts,
-        order: args.order,
-      })) as ListEventsResult<TOptions>;
-    } catch (error) {
-      throw toThrownError(error, "list events");
-    }
+    args: ListEventsArgs<Namespace>,
+  ): Promise<ListEventsResult> {
+    return await ctx.runQuery(this.component.lib.listEvents, {
+      namespace: args.namespace,
+      secretId: args.secretId,
+      name: args.name,
+      type: args.type,
+      paginationOpts: args.paginationOpts,
+      order: args.order,
+    });
   }
 
   /**
-   * Rewrap rows from one KEK version onto the active KEK version.
-   *
-   * This operation does not rewrite encrypted secret plaintext. It only unwraps
-   * each row's stored DEK with `fromVersion` and rewraps that DEK with the
-   * active version. Concurrent writes are protected with compare-and-swap checks;
-   * stale rows are skipped safely and can be retried in later batches.
+   * Rewrap secrets onto the active KEK version. Call once after deploying a new
+   * key — it drains in the background; safe to call again to resume a stalled
+   * run. Returns the first batch's `{ rotated, skipped, isDone }`. `skipped`
+   * counts orphan rows whose `keyVersion` is no longer configured (or whose
+   * material was replaced under the same version, which is unsupported).
    */
-  async rotateKeys(
-    ctx: RunMutationCtx & RunQueryCtx,
-    args: RotateKeysArgs,
-  ): Promise<RotateKeysResult> {
-    if (!Number.isInteger(args.fromVersion) || args.fromVersion < 0) {
-      throw invalidArgumentError("fromVersion must be a non-negative integer");
-    }
-    const batchSize = args.batchSize ?? DEFAULT_ROTATION_BATCH_SIZE;
-    if (!Number.isInteger(batchSize) || batchSize <= 0) {
-      throw invalidArgumentError("batchSize must be a positive integer");
-    }
-
-    const toVersion = this.options.activeVersion;
-    if (args.fromVersion === toVersion) {
-      throw invalidArgumentError(
-        "fromVersion must differ from the active version",
-      );
-    }
-    if (!this.options.keyVersions.has(args.fromVersion)) {
-      throw keyVersionUnavailableError(args.fromVersion);
-    }
-
-    try {
-      const page = await ctx.runQuery(this.component.lib.listByKeyVersion, {
-        fromVersion: args.fromVersion,
-        order: args.order,
-        paginationOpts: {
-          numItems: batchSize,
-          cursor: args.cursor ?? null,
-        },
-      });
-
-      const fromKek = await this.getKEK(args.fromVersion);
-      const toKek = await this.getKEK(toVersion);
-      let rotated = 0;
-      let skipped = 0;
-
-      for (const row of page.page) {
-        const nextWrapped = await rewrapDEK({
-          wrappedDEK: row.wrappedDEK,
-          dekIv: row.dekIv,
-          namespace: row.namespace,
-          name: row.name,
-          fromVersion: args.fromVersion,
-          toVersion,
-          fromKek,
-          toKek,
-        });
-
-        const result = await ctx.runMutation(
-          this.component.lib.updateWrappedDEK,
-          {
-            secretId: row.secretId,
-            expectedKeyVersion: row.keyVersion,
-            expectedUpdatedAt: row.updatedAt,
-            keyVersion: toVersion,
-            wrappedDEK: nextWrapped.wrappedDEK,
-            dekIv: nextWrapped.dekIv,
-          },
-        );
-
-        if (result.ok) {
-          rotated += 1;
-        } else {
-          skipped += 1;
-        }
-      }
-
-      let isDone = page.isDone;
-      let continueCursor: string | null = page.continueCursor;
-      if (skipped > 0 && page.isDone) {
-        const remaining = await ctx.runQuery(
-          this.component.lib.listByKeyVersion,
-          {
-            fromVersion: args.fromVersion,
-            order: args.order,
-            paginationOpts: {
-              numItems: 1,
-              cursor: null,
-            },
-          },
-        );
-        if (remaining.page.length > 0) {
-          isDone = false;
-          continueCursor = null;
-        }
-      }
-
-      return {
-        fromVersion: args.fromVersion,
-        toVersion,
-        processed: page.page.length,
-        rotated,
-        skipped,
-        isDone,
-        continueCursor,
-      };
-    } catch (error) {
-      throw toThrownError(error, `rotate from version ${args.fromVersion}`);
-    }
+  async rotate(ctx: RunMutationCtx): Promise<RotateResult> {
+    return await ctx.runMutation(this.component.lib.rotate, {});
   }
 
   /**
-   * Hard-delete expired secrets that have been past their expiry timestamp for
-   * at least the retention window.
-   *
-   * The cleanup mutation processes up to 100 rows per run and automatically
-   * reschedules itself while backlog remains. Deleting an expired secret writes
-   * a final `deleted` audit event with `deletedReason: "expired_cleanup"`.
+   * Whether every secret is on the active KEK version. Check this before
+   * retiring an old key.
+   */
+  async isRotationComplete(ctx: RunQueryCtx): Promise<boolean> {
+    return await ctx.runQuery(this.component.lib.isRotationComplete, {});
+  }
+
+  /**
+   * Hard-delete expired secrets older than the retention window (default 30
+   * days). Drains in the background; suitable for a recurring cron.
    */
   async cleanupSecrets(
     ctx: RunMutationCtx,
-    args: CleanupSecretsArgs = {},
-  ): Promise<CleanupSecretsResult> {
-    const retentionMs = args.retentionMs ?? DEFAULT_SECRET_RETENTION_MS;
-    if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
-      throw invalidArgumentError(
-        "retentionMs must be a positive finite number",
-      );
-    }
-
-    try {
-      return await ctx.runMutation(this.component.cleanup.cleanupSecrets, {
-        retentionMs,
-      });
-    } catch (error) {
-      throw toThrownError(error, "cleanup secrets");
-    }
+    args: CleanupArgs = {},
+  ): Promise<CleanupResult> {
+    return await ctx.runMutation(this.component.cleanup.cleanupSecrets, {
+      retentionMs: args.retentionMs ?? DEFAULT_SECRET_RETENTION_MS,
+    });
   }
 
   /**
-   * Hard-delete audit events older than the retention window.
-   *
-   * Event cleanup is independent from secret cleanup and may keep audit rows
-   * for much longer than expired secret rows remain in storage.
+   * Hard-delete audit events older than the retention window (default 180
+   * days). Independent from secret cleanup; suitable for a recurring cron.
    */
   async cleanupEvents(
     ctx: RunMutationCtx,
-    args: CleanupEventsArgs = {},
-  ): Promise<CleanupEventsResult> {
-    const retentionMs = args.retentionMs ?? DEFAULT_EVENT_RETENTION_MS;
-    if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
-      throw invalidArgumentError(
-        "retentionMs must be a positive finite number",
-      );
-    }
-
-    try {
-      return await ctx.runMutation(this.component.cleanup.cleanupEvents, {
-        retentionMs,
-      });
-    } catch (error) {
-      throw toThrownError(error, "cleanup events");
-    }
+    args: CleanupArgs = {},
+  ): Promise<CleanupResult> {
+    return await ctx.runMutation(this.component.cleanup.cleanupEvents, {
+      retentionMs: args.retentionMs ?? DEFAULT_EVENT_RETENTION_MS,
+    });
   }
 }

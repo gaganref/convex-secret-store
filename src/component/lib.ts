@@ -3,7 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import { paginator } from "convex-helpers/server/pagination";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
-import type { Doc, Id } from "./_generated/dataModel.js";
+import { api } from "./_generated/api.js";
 import schema from "./schema.js";
 import {
   effectiveStateValidator,
@@ -11,88 +11,16 @@ import {
   orderValidator,
   secretEventTypeValidator,
 } from "../shared.js";
+import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
+import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
+import { resolveExpiresAt } from "./expiry.js";
+import { recordEvent } from "./events.js";
 
-type SecretDoc = Doc<"secrets">;
-type SecretEventDoc = Doc<"secretEvents">;
-type SecretReplacement = Omit<SecretDoc, "_id" | "_creationTime">;
+/** Maximum plaintext value size — well under Convex's document limit. */
+const MAX_VALUE_BYTES = 64 * 1024;
+const byteCounter = new TextEncoder();
 
-function effectiveState(secret: SecretDoc, now: number): "active" | "expired" {
-  return secret.expiresAt !== undefined && now >= secret.expiresAt
-    ? "expired"
-    : "active";
-}
-
-function mapSecretRow(secret: SecretDoc, now: number) {
-  return {
-    secretId: secret._id,
-    namespace: secret.namespace,
-    name: secret.name,
-    metadata: secret.metadata,
-    createdAt: secret._creationTime,
-    updatedAt: secret.updatedAt,
-    expiresAt: secret.expiresAt,
-    effectiveState: effectiveState(secret, now),
-    keyVersion: secret.keyVersion,
-  };
-}
-
-function mapEventRow(event: SecretEventDoc) {
-  return {
-    eventId: event._id,
-    secretId: event.secretId,
-    namespace: event.namespace,
-    name: event.name,
-    type: event.type,
-    metadata: event.metadata,
-    createdAt: event.createdAt,
-  };
-}
-
-async function recordEvent(
-  ctx: MutationCtx,
-  event: {
-    secretId: Id<"secrets">;
-    namespace: string | undefined;
-    name: string;
-    type: "created" | "updated" | "deleted" | "rotated";
-    metadata?: Record<string, unknown>;
-  },
-) {
-  await ctx.db.insert("secretEvents", {
-    secretId: event.secretId,
-    namespace: event.namespace,
-    name: event.name,
-    type: event.type,
-    metadata: event.metadata,
-    createdAt: Date.now(),
-  });
-}
-
-function assertNullableNonNegativeInteger(
-  value: number | null | undefined,
-  field: string,
-) {
-  if (value === undefined || value === null) {
-    return;
-  }
-  if (!Number.isInteger(value) || value < 0) {
-    throw new ConvexError({
-      code: "invalid_argument",
-      message: `${field} must be a non-negative integer or null`,
-    });
-  }
-}
-
-function assertNonNegativeInteger(value: number, field: string) {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new ConvexError({
-      code: "invalid_argument",
-      message: `${field} must be a non-negative integer`,
-    });
-  }
-}
-
-function assertValidNamespace(namespace: string | undefined) {
+function assertValidNamespace(namespace: string | undefined): void {
   if (namespace === "") {
     throw new ConvexError({
       code: "invalid_argument",
@@ -101,12 +29,20 @@ function assertValidNamespace(namespace: string | undefined) {
   }
 }
 
-async function getSecretByName(
-  ctx: Pick<QueryCtx | MutationCtx, "db">,
+function assertValidName(name: string): void {
+  if (name.trim() === "") {
+    throw new ConvexError({
+      code: "invalid_argument",
+      message: "name must not be empty",
+    });
+  }
+}
+
+async function findSecret(
+  ctx: QueryCtx | MutationCtx,
   namespace: string | undefined,
   name: string,
 ) {
-  assertValidNamespace(namespace);
   return await ctx.db
     .query("secrets")
     .withIndex("by_namespace_and_name", (q) =>
@@ -115,53 +51,180 @@ async function getSecretByName(
     .unique();
 }
 
-function withOptionalField<T extends object, K extends string, V>(
-  object: T,
-  key: K,
-  value: V | undefined,
-): T & Partial<Record<K, V>> {
-  return value === undefined ? object : { ...object, [key]: value };
+function isExpired(secret: { expiresAt?: number }, now: number): boolean {
+  return secret.expiresAt !== undefined && now >= secret.expiresAt;
 }
 
-const failureReasonValidator = v.union(
-  v.literal("not_found"),
-  v.literal("expired"),
-);
-
-const putResultValidator = v.object({
-  secretId: v.id("secrets"),
-  createdAt: v.number(),
-  updatedAt: v.number(),
-  expiresAt: v.optional(v.number()),
-  isNew: v.boolean(),
-});
-
-const getResultValidator = v.union(
-  v.object({
-    ok: v.literal(true),
-    encryptedValue: v.string(),
-    iv: v.string(),
-    wrappedDEK: v.string(),
-    dekIv: v.string(),
-    keyVersion: v.number(),
-    metadata: v.optional(metadataValidator),
-    expiresAt: v.optional(v.number()),
+/**
+ * Encrypt and store a secret value, upserting by `namespace + name`.
+ *
+ * The plaintext is encrypted with a fresh per-secret DEK wrapped under the
+ * active KEK; only ciphertext is persisted. Expiry is recomputed on every
+ * write (ADR 0003). On overwrite, omitted `metadata` is preserved and `null`
+ * clears it. Records a `created` or `updated` audit event.
+ */
+export const put = mutation({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+    value: v.string(),
+    metadata: v.optional(v.union(metadataValidator, v.null())),
+    ttlMs: v.optional(v.union(v.number(), v.null())),
+  },
+  returns: v.object({
+    secretId: v.id("secrets"),
+    createdAt: v.number(),
     updatedAt: v.number(),
+    expiresAt: v.optional(v.number()),
+    isNew: v.boolean(),
   }),
-  v.object({
-    ok: v.literal(false),
-    reason: failureReasonValidator,
-  }),
-);
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    assertValidName(args.name);
+    if (byteCounter.encode(args.value).byteLength > MAX_VALUE_BYTES) {
+      throw new ConvexError({
+        code: "value_too_large",
+        message: `secret value exceeds the ${MAX_VALUE_BYTES}-byte limit`,
+      });
+    }
 
-const removeResultValidator = v.object({
-  removed: v.boolean(),
+    const now = Date.now();
+    const expiresAt = resolveExpiresAt(now, args.ttlMs, defaultTtlMs());
+
+    const keyVersion = activeVersion();
+    const payload = await encryptSecret({
+      value: args.value,
+      namespace: args.namespace,
+      name: args.name,
+      keyVersion,
+      kek: await getKEK(keyVersion),
+    });
+    const existing = await findSecret(ctx, args.namespace, args.name);
+
+    if (existing === null) {
+      const secretId = await ctx.db.insert("secrets", {
+        namespace: args.namespace,
+        name: args.name,
+        ...payload,
+        keyVersion,
+        ...(args.metadata != null ? { metadata: args.metadata } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+        updatedAt: now,
+      });
+      await recordEvent(ctx, {
+        secretId,
+        namespace: args.namespace,
+        name: args.name,
+        type: "created",
+      });
+      return {
+        secretId,
+        createdAt: now,
+        updatedAt: now,
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+        isNew: true,
+      };
+    }
+
+    const nextMetadata =
+      args.metadata === undefined
+        ? existing.metadata
+        : args.metadata === null
+          ? undefined
+          : args.metadata;
+    await ctx.db.patch(existing._id, {
+      ...payload,
+      keyVersion,
+      metadata: nextMetadata,
+      expiresAt,
+      updatedAt: now,
+    });
+    await recordEvent(ctx, {
+      secretId: existing._id,
+      namespace: args.namespace,
+      name: args.name,
+      type: "updated",
+    });
+    return {
+      secretId: existing._id,
+      createdAt: existing._creationTime,
+      updatedAt: now,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      isNew: false,
+    };
+  },
 });
 
-const updateResultValidator = v.object({
-  updated: v.boolean(),
-  updatedAt: v.optional(v.number()),
-  expiresAt: v.optional(v.number()),
+/**
+ * Load and decrypt a secret value.
+ *
+ * Expiry is evaluated against the caller-supplied `now` (ADR 0004). Returns
+ * `not_found`, `expired`, or `key_unavailable` when the secret is unusable.
+ */
+export const get = query({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+    now: v.number(),
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(true),
+      value: v.string(),
+      metadata: v.optional(metadataValidator),
+      expiresAt: v.optional(v.number()),
+      updatedAt: v.number(),
+    }),
+    v.object({
+      ok: v.literal(false),
+      reason: v.union(
+        v.literal("not_found"),
+        v.literal("expired"),
+        v.literal("key_unavailable"),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    assertValidName(args.name);
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    if (secret === null) {
+      return { ok: false as const, reason: "not_found" as const };
+    }
+    if (isExpired(secret, args.now)) {
+      return { ok: false as const, reason: "expired" as const };
+    }
+    if (!hasVersion(secret.keyVersion)) {
+      return { ok: false as const, reason: "key_unavailable" as const };
+    }
+
+    let value: string;
+    try {
+      value = await decryptSecret({
+        encryptedValue: secret.encryptedValue,
+        iv: secret.iv,
+        wrappedDEK: secret.wrappedDEK,
+        dekIv: secret.dekIv,
+        namespace: secret.namespace,
+        name: secret.name,
+        keyVersion: secret.keyVersion,
+        kek: await getKEK(secret.keyVersion),
+      });
+    } catch {
+      throw new ConvexError({
+        code: "decryption_failed",
+        message: `failed to decrypt secret "${args.name}"`,
+      });
+    }
+
+    return {
+      ok: true as const,
+      value,
+      metadata: secret.metadata,
+      expiresAt: secret.expiresAt,
+      updatedAt: secret.updatedAt,
+    };
+  },
 });
 
 const listItemValidator = v.object({
@@ -176,10 +239,155 @@ const listItemValidator = v.object({
   keyVersion: v.number(),
 });
 
-const listResultValidator = v.object({
-  page: v.array(listItemValidator),
-  isDone: v.boolean(),
-  continueCursor: v.string(),
+/**
+ * Paginate secrets in a namespace, newest-updated first.
+ *
+ * Each row carries `effectiveState` (evaluated against the caller-supplied
+ * `now`, per ADR 0004) so callers can distinguish active from expired secrets
+ * without an extra query. The decrypted value is never included.
+ */
+export const list = query({
+  args: {
+    namespace: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+    order: orderValidator,
+    now: v.number(),
+  },
+  returns: v.object({
+    page: v.array(listItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    const result = await paginator(ctx.db, schema)
+      .query("secrets")
+      .withIndex("by_namespace_and_updated_at", (q) =>
+        q.eq("namespace", args.namespace),
+      )
+      .order(args.order ?? "desc")
+      .paginate(args.paginationOpts);
+
+    return {
+      page: result.page.map((secret) => ({
+        secretId: secret._id,
+        namespace: secret.namespace,
+        name: secret.name,
+        metadata: secret.metadata,
+        createdAt: secret._creationTime,
+        updatedAt: secret.updatedAt,
+        expiresAt: secret.expiresAt,
+        effectiveState: isExpired(secret, args.now)
+          ? ("expired" as const)
+          : ("active" as const),
+        keyVersion: secret.keyVersion,
+      })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
+  },
+});
+
+/**
+ * Update a secret's metadata or expiry without re-encrypting its value.
+ *
+ * Pass `null` to clear `metadata` or expiry, or `ttlMs` to set expiry to
+ * `now + ttlMs`. Omitted fields are preserved. At least one of `metadata` or
+ * `ttlMs` must be supplied — calling with neither throws `invalid_argument`
+ * (almost always a caller bug). Returns `updated: false` only when the secret
+ * does not exist (symmetric with `remove`). Records an `updated` audit event
+ * when a change is applied.
+ */
+export const update = mutation({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+    metadata: v.optional(v.union(metadataValidator, v.null())),
+    ttlMs: v.optional(v.union(v.number(), v.null())),
+  },
+  returns: v.object({
+    updated: v.boolean(),
+    updatedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+  }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    assertValidName(args.name);
+    if (args.metadata === undefined && args.ttlMs === undefined) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "update requires at least one of metadata or ttlMs",
+      });
+    }
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    if (secret === null) {
+      return { updated: false as const };
+    }
+
+    const now = Date.now();
+    const nextExpiresAt =
+      args.ttlMs === undefined
+        ? secret.expiresAt
+        : resolveExpiresAt(now, args.ttlMs, null);
+
+    const patch: {
+      updatedAt: number;
+      metadata?: Record<string, unknown>;
+      expiresAt?: number;
+    } = { updatedAt: now };
+    const changed: Array<"metadata" | "ttl"> = [];
+    if (args.metadata !== undefined) {
+      patch.metadata = args.metadata === null ? undefined : args.metadata;
+      changed.push("metadata");
+    }
+    if (args.ttlMs !== undefined) {
+      patch.expiresAt = nextExpiresAt;
+      changed.push("ttl");
+    }
+    await ctx.db.patch(secret._id, patch);
+    await recordEvent(ctx, {
+      secretId: secret._id,
+      namespace: secret.namespace,
+      name: secret.name,
+      type: "updated",
+      metadata: { changed },
+    });
+
+    return {
+      updated: true as const,
+      updatedAt: now,
+      ...(nextExpiresAt !== undefined ? { expiresAt: nextExpiresAt } : {}),
+    };
+  },
+});
+
+/**
+ * Delete a secret. Records a `deleted` audit event with reason `removed`.
+ * Returns `removed: false` when the secret does not exist.
+ */
+export const remove = mutation({
+  args: {
+    namespace: v.optional(v.string()),
+    name: v.string(),
+  },
+  returns: v.object({ removed: v.boolean() }),
+  handler: async (ctx, args) => {
+    assertValidNamespace(args.namespace);
+    assertValidName(args.name);
+    const secret = await findSecret(ctx, args.namespace, args.name);
+    if (secret === null) {
+      return { removed: false };
+    }
+    await recordEvent(ctx, {
+      secretId: secret._id,
+      namespace: secret.namespace,
+      name: secret.name,
+      type: "deleted",
+      metadata: { reason: "removed" },
+    });
+    await ctx.db.delete(secret._id);
+    return { removed: true };
+  },
 });
 
 const eventItemValidator = v.object({
@@ -192,420 +400,89 @@ const eventItemValidator = v.object({
   createdAt: v.number(),
 });
 
-const listEventsResultValidator = v.object({
-  page: v.array(eventItemValidator),
-  isDone: v.boolean(),
-  continueCursor: v.string(),
-});
-
-const listByKeyVersionItemValidator = v.object({
-  secretId: v.id("secrets"),
-  namespace: v.optional(v.string()),
-  name: v.string(),
-  wrappedDEK: v.string(),
-  dekIv: v.string(),
-  keyVersion: v.number(),
-  updatedAt: v.number(),
-});
-
-const listByKeyVersionResultValidator = v.object({
-  page: v.array(listByKeyVersionItemValidator),
-  isDone: v.boolean(),
-  continueCursor: v.string(),
-});
-
-const updateWrappedDEKResultValidator = v.union(
-  v.object({
-    ok: v.literal(true),
-    updatedAt: v.number(),
-  }),
-  v.object({
-    ok: v.literal(false),
-    reason: v.union(v.literal("not_found"), v.literal("stale")),
-  }),
-);
-
-export const put = mutation({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-    encryptedValue: v.string(),
-    iv: v.string(),
-    wrappedDEK: v.string(),
-    dekIv: v.string(),
-    keyVersion: v.number(),
-    metadata: v.optional(v.union(metadataValidator, v.null())),
-    expiresAt: v.optional(v.union(v.number(), v.null())),
-  },
-  returns: putResultValidator,
-  handler: async (ctx, args) => {
-    assertNonNegativeInteger(args.keyVersion, "keyVersion");
-    assertNullableNonNegativeInteger(args.expiresAt, "expiresAt");
-    const existing = await getSecretByName(ctx, args.namespace, args.name);
-    const now = Date.now();
-
-    if (existing === null) {
-      const secretId = await ctx.db.insert("secrets", {
-        namespace: args.namespace,
-        name: args.name,
-        encryptedValue: args.encryptedValue,
-        iv: args.iv,
-        wrappedDEK: args.wrappedDEK,
-        dekIv: args.dekIv,
-        keyVersion: args.keyVersion,
-        ...(args.metadata !== undefined && args.metadata !== null
-          ? { metadata: args.metadata }
-          : {}),
-        ...(typeof args.expiresAt === "number"
-          ? { expiresAt: args.expiresAt }
-          : {}),
-        updatedAt: now,
-      });
-      await recordEvent(ctx, {
-        secretId,
-        namespace: args.namespace,
-        name: args.name,
-        type: "created",
-        metadata:
-          args.metadata !== undefined && args.metadata !== null
-            ? args.metadata
-            : undefined,
-      });
-      return {
-        secretId,
-        createdAt: now,
-        updatedAt: now,
-        ...(typeof args.expiresAt === "number"
-          ? { expiresAt: args.expiresAt }
-          : {}),
-        isNew: true,
-      };
-    }
-
-    const {
-      _id: _existingId,
-      _creationTime: _existingCreatedAt,
-      metadata: storedMetadata,
-      expiresAt: storedExpiresAt,
-      ...stored
-    } = existing;
-    const nextMetadata =
-      args.metadata === undefined
-        ? storedMetadata
-        : args.metadata === null
-          ? undefined
-          : args.metadata;
-    const nextExpiresAt =
-      args.expiresAt === undefined
-        ? storedExpiresAt
-        : args.expiresAt === null
-          ? undefined
-          : args.expiresAt;
-
-    const replacement: SecretReplacement = withOptionalField(
-      withOptionalField(
-        {
-          ...stored,
-          namespace: args.namespace,
-          name: args.name,
-          encryptedValue: args.encryptedValue,
-          iv: args.iv,
-          wrappedDEK: args.wrappedDEK,
-          dekIv: args.dekIv,
-          keyVersion: args.keyVersion,
-          updatedAt: now,
-        },
-        "metadata",
-        nextMetadata,
-      ),
-      "expiresAt",
-      nextExpiresAt,
-    );
-
-    await ctx.db.replace(existing._id, replacement);
-    await recordEvent(ctx, {
-      secretId: existing._id,
-      namespace: args.namespace,
-      name: args.name,
-      type: "updated",
-      metadata:
-        args.metadata !== undefined && args.metadata !== null
-          ? args.metadata
-          : undefined,
-    });
-    return {
-      secretId: existing._id,
-      createdAt: existing._creationTime,
-      updatedAt: now,
-      ...(replacement.expiresAt !== undefined
-        ? { expiresAt: replacement.expiresAt }
-        : {}),
-      isNew: false,
-    };
-  },
-});
-
-export const get = query({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-    now: v.number(),
-  },
-  returns: getResultValidator,
-  handler: async (ctx, args) => {
-    const secret = await getSecretByName(ctx, args.namespace, args.name);
-    if (secret === null) {
-      return { ok: false as const, reason: "not_found" as const };
-    }
-    if (secret.expiresAt !== undefined && args.now >= secret.expiresAt) {
-      return { ok: false as const, reason: "expired" as const };
-    }
-    return {
-      ok: true as const,
-      encryptedValue: secret.encryptedValue,
-      iv: secret.iv,
-      wrappedDEK: secret.wrappedDEK,
-      dekIv: secret.dekIv,
-      keyVersion: secret.keyVersion,
-      metadata: secret.metadata,
-      expiresAt: secret.expiresAt,
-      updatedAt: secret.updatedAt,
-    };
-  },
-});
-
-export const has = query({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-    now: v.number(),
-  },
-  returns: v.boolean(),
-  handler: async (ctx, args) => {
-    const secret = await getSecretByName(ctx, args.namespace, args.name);
-    if (secret === null) {
-      return false;
-    }
-    return !(secret.expiresAt !== undefined && args.now >= secret.expiresAt);
-  },
-});
-
-export const remove = mutation({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-  },
-  returns: removeResultValidator,
-  handler: async (ctx, args) => {
-    const secret = await getSecretByName(ctx, args.namespace, args.name);
-    if (secret === null) {
-      return { removed: false };
-    }
-    await recordEvent(ctx, {
-      secretId: secret._id,
-      namespace: secret.namespace,
-      name: secret.name,
-      type: "deleted",
-      metadata: { deletedReason: "explicit_remove" },
-    });
-    await ctx.db.delete(secret._id);
-    return { removed: true };
-  },
-});
-
-export const update = mutation({
-  args: {
-    namespace: v.optional(v.string()),
-    name: v.string(),
-    metadata: v.optional(v.union(metadataValidator, v.null())),
-    expiresAt: v.optional(v.union(v.number(), v.null())),
-  },
-  returns: updateResultValidator,
-  handler: async (ctx, args) => {
-    if (args.metadata === undefined && args.expiresAt === undefined) {
-      return { updated: false };
-    }
-    assertNullableNonNegativeInteger(args.expiresAt, "expiresAt");
-    const secret = await getSecretByName(ctx, args.namespace, args.name);
-    if (secret === null) {
-      return { updated: false };
-    }
-
-    const {
-      _id: _secretId,
-      _creationTime: _secretCreatedAt,
-      metadata: storedMetadata,
-      expiresAt: storedExpiresAt,
-      ...stored
-    } = secret;
-    const nextMetadata =
-      args.metadata === undefined
-        ? storedMetadata
-        : args.metadata === null
-          ? undefined
-          : args.metadata;
-    const nextExpiresAt =
-      args.expiresAt === undefined
-        ? storedExpiresAt
-        : args.expiresAt === null
-          ? undefined
-          : args.expiresAt;
-    const updatedAt = Date.now();
-    const replacement: SecretReplacement = withOptionalField(
-      withOptionalField(
-        {
-          ...stored,
-          updatedAt,
-        },
-        "metadata",
-        nextMetadata,
-      ),
-      "expiresAt",
-      nextExpiresAt,
-    );
-    await ctx.db.replace(secret._id, replacement);
-    await recordEvent(ctx, {
-      secretId: secret._id,
-      namespace: secret.namespace,
-      name: secret.name,
-      type: "updated",
-      metadata:
-        args.metadata !== undefined && args.metadata !== null
-          ? args.metadata
-          : undefined,
-    });
-    return {
-      updated: true,
-      updatedAt,
-      ...(replacement.expiresAt !== undefined
-        ? { expiresAt: replacement.expiresAt }
-        : {}),
-    };
-  },
-});
-
-export const list = query({
-  args: {
-    namespace: v.optional(v.string()),
-    paginationOpts: paginationOptsValidator,
-    order: orderValidator,
-    now: v.number(),
-  },
-  returns: listResultValidator,
-  handler: async (ctx, args) => {
-    assertValidNamespace(args.namespace);
-    const result = await paginator(ctx.db, schema)
-      .query("secrets")
-      .withIndex("by_namespace_and_updated_at", (q) =>
-        q.eq("namespace", args.namespace),
-      )
-      .order(args.order ?? "desc")
-      .paginate(args.paginationOpts);
-
-    return {
-      page: result.page.map((secret) => mapSecretRow(secret, args.now)),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
-    };
-  },
-});
-
+/**
+ * Paginate audit events.
+ *
+ * Filter by `secretId`, or by `namespace` optionally narrowed with `name` or
+ * `type`. Omitting `namespace` targets the default namespace. `secretId`
+ * cannot combine with the other filters, and `name` and `type` cannot combine.
+ */
 export const listEvents = query({
   args: {
-    paginationOpts: paginationOptsValidator,
-    secretId: v.optional(v.id("secrets")),
     namespace: v.optional(v.string()),
+    secretId: v.optional(v.id("secrets")),
     name: v.optional(v.string()),
     type: v.optional(secretEventTypeValidator),
+    paginationOpts: paginationOptsValidator,
     order: orderValidator,
   },
-  returns: listEventsResultValidator,
+  returns: v.object({
+    page: v.array(eventItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
-    const hasSecretId = args.secretId !== undefined;
-    const hasName = args.name !== undefined;
-    const hasType = args.type !== undefined;
-    if (hasSecretId && (args.namespace !== undefined || hasName || hasType)) {
+    if (args.name !== undefined) {
+      assertValidName(args.name);
+    }
+    const { secretId, namespace, name, type } = args;
+
+    if (
+      secretId !== undefined &&
+      (namespace !== undefined || name !== undefined || type !== undefined)
+    ) {
       throw new ConvexError({
         code: "invalid_argument",
         message: "secretId cannot be combined with namespace, name, or type",
       });
     }
-    if (hasName && hasType) {
+    if (name !== undefined && type !== undefined) {
       throw new ConvexError({
         code: "invalid_argument",
-        message: "name and type cannot be combined in V1",
-      });
-    }
-    if ((hasName || hasType) && args.namespace === undefined) {
-      throw new ConvexError({
-        code: "invalid_argument",
-        message: "namespace is required when filtering by name or type",
+        message: "name and type cannot be combined",
       });
     }
 
-    const pages = paginator(ctx.db, schema).query("secretEvents");
     const order = args.order ?? "desc";
-    const result = hasSecretId
-      ? await pages
-          .withIndex("by_secret_id_and_created_at", (q) =>
-            q.eq("secretId", args.secretId!),
-          )
-          .order(order)
-          .paginate(args.paginationOpts)
-      : hasName
-        ? await pages
-            .withIndex("by_namespace_and_name_and_created_at", (q) =>
-              q.eq("namespace", args.namespace!).eq("name", args.name!),
-            )
-            .order(order)
-            .paginate(args.paginationOpts)
-        : hasType
-          ? await pages
-              .withIndex("by_namespace_and_type_and_created_at", (q) =>
-                q.eq("namespace", args.namespace!).eq("type", args.type!),
-              )
-              .order(order)
-              .paginate(args.paginationOpts)
-          : await pages
-              .withIndex("by_namespace_and_created_at", (q) =>
-                q.eq("namespace", args.namespace),
-              )
-              .order(order)
-              .paginate(args.paginationOpts);
+    const events = paginator(ctx.db, schema).query("secretEvents");
+
+    let result;
+    if (secretId !== undefined) {
+      result = await events
+        .withIndex("by_secret_id", (q) => q.eq("secretId", secretId))
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else if (name !== undefined) {
+      result = await events
+        .withIndex("by_namespace_and_name", (q) =>
+          q.eq("namespace", namespace).eq("name", name),
+        )
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else if (type !== undefined) {
+      result = await events
+        .withIndex("by_namespace_and_type", (q) =>
+          q.eq("namespace", namespace).eq("type", type),
+        )
+        .order(order)
+        .paginate(args.paginationOpts);
+    } else {
+      result = await events
+        .withIndex("by_namespace", (q) => q.eq("namespace", namespace))
+        .order(order)
+        .paginate(args.paginationOpts);
+    }
 
     return {
-      page: result.page.map(mapEventRow),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
-    };
-  },
-});
-
-export const listByKeyVersion = query({
-  args: {
-    fromVersion: v.number(),
-    paginationOpts: paginationOptsValidator,
-    order: orderValidator,
-  },
-  returns: listByKeyVersionResultValidator,
-  handler: async (ctx, args) => {
-    assertNonNegativeInteger(args.fromVersion, "fromVersion");
-    const result = await paginator(ctx.db, schema)
-      .query("secrets")
-      .withIndex("by_key_version", (q) => q.eq("keyVersion", args.fromVersion))
-      .order(args.order ?? "desc")
-      .paginate(args.paginationOpts);
-
-    return {
-      page: result.page.map((secret) => ({
-        secretId: secret._id,
-        namespace: secret.namespace,
-        name: secret.name,
-        wrappedDEK: secret.wrappedDEK,
-        dekIv: secret.dekIv,
-        keyVersion: secret.keyVersion,
-        updatedAt: secret.updatedAt,
+      page: result.page.map((event) => ({
+        eventId: event._id,
+        secretId: event.secretId,
+        namespace: event.namespace,
+        name: event.name,
+        type: event.type,
+        metadata: event.metadata,
+        createdAt: event._creationTime,
       })),
       isDone: result.isDone,
       continueCursor: result.continueCursor,
@@ -613,47 +490,123 @@ export const listByKeyVersion = query({
   },
 });
 
-export const updateWrappedDEK = mutation({
-  args: {
-    secretId: v.id("secrets"),
-    expectedKeyVersion: v.number(),
-    expectedUpdatedAt: v.number(),
-    wrappedDEK: v.string(),
-    dekIv: v.string(),
-    keyVersion: v.number(),
-  },
-  returns: updateWrappedDEKResultValidator,
-  handler: async (ctx, args) => {
-    assertNonNegativeInteger(args.expectedKeyVersion, "expectedKeyVersion");
-    assertNonNegativeInteger(args.keyVersion, "keyVersion");
-    const secret = await ctx.db.get(args.secretId);
-    if (secret === null) {
-      return { ok: false as const, reason: "not_found" as const };
-    }
-    if (
-      secret.keyVersion !== args.expectedKeyVersion ||
-      secret.updatedAt !== args.expectedUpdatedAt
-    ) {
-      return { ok: false as const, reason: "stale" as const };
+/** Batch size for one rotation transaction. */
+const ROTATION_BATCH_SIZE = 100;
+
+/**
+ * Rewrap a batch of secrets onto the active KEK version.
+ *
+ * Processes up to 100 rows whose `keyVersion` is below the active version in a
+ * single transaction, then reschedules itself while stale rows remain. Per
+ * ADR 0002 there is no cursor and no progress table — the `keyVersion < active`
+ * slice is self-consuming, so each batch scans a shrinking range from the
+ * start. Records a `rotated` audit event per row; safe to call repeatedly.
+ */
+export const rotate = mutation({
+  args: {},
+  returns: v.object({
+    rotated: v.number(),
+    skipped: v.number(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx) => {
+    const active = activeVersion();
+    const stale = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
+      .take(ROTATION_BATCH_SIZE);
+
+    if (stale.length === 0) {
+      return { rotated: 0, skipped: 0, isDone: true };
     }
 
-    const updatedAt = Date.now();
-    await ctx.db.patch(secret._id, {
-      wrappedDEK: args.wrappedDEK,
-      dekIv: args.dekIv,
-      keyVersion: args.keyVersion,
-      updatedAt,
-    });
-    await recordEvent(ctx, {
-      secretId: secret._id,
-      namespace: secret.namespace,
-      name: secret.name,
-      type: "rotated",
-      metadata: {
-        previousKeyVersion: args.expectedKeyVersion,
-        newKeyVersion: args.keyVersion,
-      },
-    });
-    return { ok: true as const, updatedAt };
+    const toKek = await getKEK(active);
+    let rotated = 0;
+    let skipped = 0;
+    for (const secret of stale) {
+      // Skip rather than throw — one orphan row must not poison the batch and
+      // wedge the rotation chain. Recovery is operator-side (re-add the KEK or
+      // `remove` the row); the count is surfaced via `skipped`.
+      if (!hasVersion(secret.keyVersion)) {
+        console.warn(
+          `secret-store: cannot rotate secret "${secret.name}" — ` +
+            `keyVersion ${secret.keyVersion} is not configured. ` +
+            `Re-add the retired KEK or delete the row.`,
+        );
+        skipped++;
+        continue;
+      }
+      let rewrapped;
+      try {
+        rewrapped = await rewrapDEK({
+          wrappedDEK: secret.wrappedDEK,
+          dekIv: secret.dekIv,
+          namespace: secret.namespace,
+          name: secret.name,
+          fromVersion: secret.keyVersion,
+          toVersion: active,
+          fromKek: await getKEK(secret.keyVersion),
+          toKek,
+        });
+      } catch {
+        // Version is configured but unwrap failed — almost always because the
+        // operator replaced the KEK material under the same version number
+        // (unsupported; versions are immutable).
+        console.warn(
+          `secret-store: cannot rotate secret "${secret.name}" — ` +
+            `rewrap under keyVersion ${secret.keyVersion} failed. ` +
+            `KEK material for that version may have been replaced.`,
+        );
+        skipped++;
+        continue;
+      }
+      await ctx.db.patch(secret._id, {
+        wrappedDEK: rewrapped.wrappedDEK,
+        dekIv: rewrapped.dekIv,
+        keyVersion: active,
+      });
+      await recordEvent(ctx, {
+        secretId: secret._id,
+        namespace: secret.namespace,
+        name: secret.name,
+        type: "rotated",
+        metadata: { fromVersion: secret.keyVersion, toVersion: active },
+      });
+      rotated++;
+    }
+
+    // No progress this batch means only orphan rows remain — stop rescheduling
+    // so the chain doesn't spin forever. Operator must intervene.
+    const isDone = stale.length < ROTATION_BATCH_SIZE || rotated === 0;
+    if (!isDone) {
+      await ctx.scheduler.runAfter(0, api.lib.rotate, {});
+    }
+    return { rotated, skipped, isDone };
+  },
+});
+
+/**
+ * Whether every secret is on the active KEK version.
+ *
+ * Use this to confirm rotation has fully drained before retiring an old key.
+ */
+export const isRotationComplete = query({
+  args: {},
+  returns: v.boolean(),
+  handler: async (ctx) => {
+    const active = activeVersion();
+    // Check both directions: rows above the active version exist only if the
+    // operator retired the highest configured key (a misconfiguration), but
+    // they still mean rotation isn't complete.
+    const below = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
+      .first();
+    if (below !== null) return false;
+    const above = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.gt("keyVersion", active))
+      .first();
+    return above === null;
   },
 });

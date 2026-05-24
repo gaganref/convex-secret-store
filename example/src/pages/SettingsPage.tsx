@@ -27,14 +27,14 @@ export function SettingsPage({
     workspace,
     environment,
   });
-  const runRotationBatch = useMutation(api.example.runRotationBatch);
+  const runRotation = useMutation(api.example.runRotation);
   const runCleanup = useMutation(api.example.runCleanup);
   const runEventCleanup = useMutation(api.example.runEventCleanup);
   const seedDemoData = useMutation(api.example.seedDemoData);
 
   const [operationState, setOperationState] = useState<string | null>(null);
   const [rotationResult, setRotationResult] = useState<Awaited<
-    ReturnType<typeof runRotationBatch>
+    ReturnType<typeof runRotation>
   > | null>(null);
   const [secretCleanupResult, setSecretCleanupResult] = useState<Awaited<
     ReturnType<typeof runCleanup>
@@ -45,20 +45,13 @@ export function SettingsPage({
   const [seedResult, setSeedResult] = useState<number | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
 
-  const legacyCount =
-    snapshot?.versionCounts.find((e) => e.keyVersion === 1)?.count ?? 0;
   const isOperating = operationState !== null;
 
   async function handleRotate() {
     setOperationState("Rotating");
     setOperationError(null);
     try {
-      const result = await runRotationBatch({
-        fromVersion: 1,
-        batchSize: 25,
-        cursor: null,
-      });
-      setRotationResult(result);
+      setRotationResult(await runRotation({}));
     } catch (error) {
       setOperationError(getErrorMessage(error, "Rotation failed."));
     } finally {
@@ -138,7 +131,7 @@ export function SettingsPage({
         </div>
       ) : (
         <>
-          {/* Key versions */}
+          {/* Version summary */}
           <Card size="sm">
             <CardHeader>
               <div>
@@ -150,21 +143,18 @@ export function SettingsPage({
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {snapshot.configuredVersions.map((version) => (
-                  <Badge
-                    key={version}
-                    variant={
-                      version === snapshot.activeVersion ? "default" : "outline"
-                    }
-                  >
-                    v{version}{" "}
-                    {version === snapshot.activeVersion ? "(active)" : ""} ·{" "}
-                    {snapshot.versionCounts.find(
-                      (e) => e.keyVersion === version,
-                    )?.count ?? 0}{" "}
-                    rows
-                  </Badge>
-                ))}
+                {snapshot.versionCounts.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    No secrets in this scope yet.
+                  </span>
+                ) : (
+                  snapshot.versionCounts.map((entry) => (
+                    <Badge key={entry.keyVersion} variant="outline">
+                      key v{entry.keyVersion} ·{" "}
+                      {formatCountLabel(entry.count, "row")}
+                    </Badge>
+                  ))
+                )}
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">
@@ -180,6 +170,13 @@ export function SettingsPage({
                     ? formatCountLabel(snapshot.expiredSecrets, "expired")
                     : "None expired"}
                 </Badge>
+                <Badge
+                  variant={snapshot.rotationComplete ? "default" : "destructive"}
+                >
+                  {snapshot.rotationComplete
+                    ? "Rotation complete"
+                    : "Rotation pending"}
+                </Badge>
               </div>
             </CardContent>
           </Card>
@@ -191,47 +188,34 @@ export function SettingsPage({
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
                   Rotation
                 </p>
-                <CardTitle className="mt-0.5">
-                  Rewrap old key versions
-                </CardTitle>
+                <CardTitle className="mt-0.5">Rewrap onto the active key</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Rewrap DEKs from v1 onto the active key for the entire mounted
-                secret store. The secret plaintext is not rewritten.
+                Rewrap every secret's DEK onto the active KEK version; the secret
+                plaintext is never rewritten. Rotation only has an effect after a
+                newer key version is added to <span className="font-mono">SECRET_STORE_KEYS</span>{" "}
+                and the app is redeployed.
               </CardDescription>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => void handleRotate()}
-                  disabled={isOperating || legacyCount === 0}
-                >
-                  <ArrowsClockwise size={12} data-icon="inline-start" />
-                  Rotate v1 rows
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {legacyCount > 0
-                    ? `${legacyCount} row${legacyCount !== 1 ? "s" : ""} on v1`
-                    : "No v1 rows to rotate"}
-                </span>
-              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void handleRotate()}
+                disabled={isOperating}
+              >
+                <ArrowsClockwise size={12} data-icon="inline-start" />
+                Run rotation
+              </Button>
               {rotationResult && (
                 <div className="flex flex-wrap gap-2 text-xs">
                   <Badge variant="outline">
-                    {rotationResult.processed} processed
-                  </Badge>
-                  <Badge variant="outline">
-                    {rotationResult.rotated} rotated
-                  </Badge>
-                  <Badge variant="outline">
-                    {rotationResult.skipped} skipped
+                    {rotationResult.rotated} rewrapped
                   </Badge>
                   <Badge
                     variant={rotationResult.isDone ? "default" : "outline"}
                   >
-                    {rotationResult.isDone ? "Complete" : "More remain"}
+                    {rotationResult.isDone ? "Complete" : "Draining…"}
                   </Badge>
                 </div>
               )}
@@ -333,8 +317,7 @@ export function SettingsPage({
                 <span className="font-mono">
                   {workspace} / {environment}
                 </span>{" "}
-                with sample secrets (DATABASE_URL, OPENAI_API_KEY, etc.)
-                including one legacy-version secret for rotation demos.
+                with sample secrets (DATABASE_URL, OPENAI_API_KEY, etc.).
               </CardDescription>
               <div className="flex items-center gap-2">
                 <Button

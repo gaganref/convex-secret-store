@@ -45,23 +45,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { name: string; namespace?: string; now: number },
         | {
-            dekIv: string;
-            encryptedValue: string;
             expiresAt?: number;
-            iv: string;
-            keyVersion: number;
             metadata?: Record<string, any>;
             ok: true;
             updatedAt: number;
-            wrappedDEK: string;
+            value: string;
           }
-        | { ok: false; reason: "not_found" | "expired" },
+        | { ok: false; reason: "not_found" | "expired" | "key_unavailable" },
         Name
       >;
-      has: FunctionReference<
+      isRotationComplete: FunctionReference<
         "query",
         "internal",
-        { name: string; namespace?: string; now: number },
+        {},
         boolean,
         Name
       >;
@@ -94,36 +90,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             namespace?: string;
             secretId: string;
             updatedAt: number;
-          }>;
-        },
-        Name
-      >;
-      listByKeyVersion: FunctionReference<
-        "query",
-        "internal",
-        {
-          fromVersion: number;
-          order?: "asc" | "desc";
-          paginationOpts: {
-            cursor: string | null;
-            endCursor?: string | null;
-            id?: number;
-            maximumBytesRead?: number;
-            maximumRowsRead?: number;
-            numItems: number;
-          };
-        },
-        {
-          continueCursor: string;
-          isDone: boolean;
-          page: Array<{
-            dekIv: string;
-            keyVersion: number;
-            name: string;
-            namespace?: string;
-            secretId: string;
-            updatedAt: number;
-            wrappedDEK: string;
           }>;
         },
         Name
@@ -165,15 +131,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
-          dekIv: string;
-          encryptedValue: string;
-          expiresAt?: number | null;
-          iv: string;
-          keyVersion: number;
           metadata?: Record<string, any> | null;
           name: string;
           namespace?: string;
-          wrappedDEK: string;
+          ttlMs?: number | null;
+          value: string;
         },
         {
           createdAt: number;
@@ -191,31 +153,23 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         { removed: boolean },
         Name
       >;
+      rotate: FunctionReference<
+        "mutation",
+        "internal",
+        {},
+        { isDone: boolean; rotated: number; skipped: number },
+        Name
+      >;
       update: FunctionReference<
         "mutation",
         "internal",
         {
-          expiresAt?: number | null;
           metadata?: Record<string, any> | null;
           name: string;
           namespace?: string;
+          ttlMs?: number | null;
         },
         { expiresAt?: number; updated: boolean; updatedAt?: number },
-        Name
-      >;
-      updateWrappedDEK: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          dekIv: string;
-          expectedKeyVersion: number;
-          expectedUpdatedAt: number;
-          keyVersion: number;
-          secretId: string;
-          wrappedDEK: string;
-        },
-        | { ok: true; updatedAt: number }
-        | { ok: false; reason: "not_found" | "stale" },
         Name
       >;
     };

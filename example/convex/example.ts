@@ -2,19 +2,16 @@ import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import { v } from "convex/values";
 import {
-  activeDemoVersion,
-  configuredDemoVersions,
   environmentValidator,
-  legacySecrets,
   secrets,
   toNamespace,
 } from "./lib/secretStore.js";
 
 function maskSecret(value: string) {
   if (value.length <= 8) {
-    return "\u2022".repeat(value.length);
+    return "•".repeat(value.length);
   }
-  return `${value.slice(0, 4)}\u2022\u2022\u2022\u2022${value.slice(-4)}`;
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +73,8 @@ export const listSecrets = query({
 });
 
 // ---------------------------------------------------------------------------
-// Server-side preview (row action). This uses a query for a reactive demo UI;
-// production integrations would usually do similar work inside an action.
+// Server-side preview. Uses a query for a reactive demo UI; production
+// integrations would usually do similar work inside an action.
 // ---------------------------------------------------------------------------
 
 export const previewSecret = query({
@@ -114,7 +111,7 @@ export const previewSecret = query({
         serverNote:
           loaded.reason === "expired"
             ? "Secret exists but is expired. The server would refuse to use it."
-            : "No secret configured for this name in the selected scope.",
+            : "No usable secret configured for this name in the selected scope.",
       };
     }
 
@@ -158,16 +155,18 @@ export const getSettingsSnapshot = query({
     environment: environmentValidator,
   },
   returns: {
-    activeVersion: v.number(),
-    configuredVersions: v.array(v.number()),
     totalSecrets: v.number(),
     expiredSecrets: v.number(),
     versionCounts: v.array(
       v.object({ keyVersion: v.number(), count: v.number() }),
     ),
+    rotationComplete: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const rows: Array<{ keyVersion: number; effectiveState: string }> = [];
+    const rows: Array<{
+      keyVersion: number;
+      effectiveState: "active" | "expired";
+    }> = [];
     let cursor: string | null = null;
     while (true) {
       const result = await secrets.list(ctx, {
@@ -190,34 +189,25 @@ export const getSettingsSnapshot = query({
     }
 
     return {
-      activeVersion: activeDemoVersion,
-      configuredVersions: configuredDemoVersions,
       totalSecrets: rows.length,
       expiredSecrets,
-      versionCounts: Array.from(versionCounts.entries()).map(
-        ([keyVersion, count]) => ({ keyVersion, count }),
-      ),
+      versionCounts: Array.from(versionCounts.entries())
+        .map(([keyVersion, count]) => ({ keyVersion, count }))
+        .sort((a, b) => a.keyVersion - b.keyVersion),
+      rotationComplete: await secrets.isRotationComplete(ctx),
     };
   },
 });
 
-export const runRotationBatch = mutation({
-  args: {
-    fromVersion: v.number(),
-    batchSize: v.optional(v.number()),
-    cursor: v.optional(v.union(v.string(), v.null())),
-  },
+export const runRotation = mutation({
+  args: {},
   returns: {
-    fromVersion: v.number(),
-    toVersion: v.number(),
-    processed: v.number(),
     rotated: v.number(),
     skipped: v.number(),
     isDone: v.boolean(),
-    continueCursor: v.union(v.string(), v.null()),
   },
-  handler: async (ctx, args) => {
-    return await secrets.rotateKeys(ctx, args);
+  handler: async (ctx) => {
+    return await secrets.rotate(ctx);
   },
 });
 
@@ -247,29 +237,6 @@ export const runEventCleanup = mutation({
   },
 });
 
-export const seedLegacySecret = mutation({
-  args: {
-    workspace: v.string(),
-    environment: environmentValidator,
-    name: v.string(),
-    value: v.string(),
-  },
-  returns: {
-    secretId: v.string(),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    expiresAt: v.optional(v.number()),
-    isNew: v.boolean(),
-  },
-  handler: async (ctx, args) => {
-    return await legacySecrets.put(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
-      name: args.name,
-      value: args.value,
-    });
-  },
-});
-
 export const seedDemoData = mutation({
   args: {
     workspace: v.string(),
@@ -291,8 +258,8 @@ export const seedDemoData = mutation({
 
     let seeded = 0;
     for (const demo of demoSecrets) {
-      const exists = await secrets.has(ctx, { namespace, name: demo.name });
-      if (!exists) {
+      const existing = await secrets.get(ctx, { namespace, name: demo.name });
+      if (!existing.ok) {
         await secrets.put(ctx, {
           namespace,
           name: demo.name,
@@ -300,21 +267,6 @@ export const seedDemoData = mutation({
         });
         seeded += 1;
       }
-    }
-
-    // Seed one legacy-version secret for rotation demos
-    const legacyName = "JWT_SIGNING_KEY";
-    const legacyExists = await secrets.has(ctx, {
-      namespace,
-      name: legacyName,
-    });
-    if (!legacyExists) {
-      await legacySecrets.put(ctx, {
-        namespace,
-        name: legacyName,
-        value: "eyJhbGciOiJIUzI1NiJ9.legacy-demo-key",
-      });
-      seeded += 1;
     }
 
     return { seeded };

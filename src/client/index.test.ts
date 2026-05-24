@@ -1,480 +1,207 @@
-import { afterEach, describe, expect, expectTypeOf, test, vi } from "vitest";
-import {
-  SecretStore,
-  SecretStoreClientError,
-  isSecretStoreClientError,
-} from "./index.js";
-import { normalizeSecretStoreOptions } from "./options.js";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { SecretStore, isSecretStoreError } from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
+import { defineKeys } from "../keys-format.js";
+import { resetKeyConfig } from "../component/keys.js";
 import type { RunMutationCtx, RunQueryCtx } from "./types.js";
 
-const KEY_V1 = Buffer.alloc(32, 1).toString("base64");
-const KEY_V2 = Buffer.alloc(32, 2).toString("base64");
+const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
+const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
+
+beforeEach(() => {
+  resetKeyConfig();
+  process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+});
+
+afterEach(() => {
+  resetKeyConfig();
+  delete process.env.SECRET_STORE_KEYS;
+});
 
 function ctxFrom(t: ReturnType<typeof initConvexTest>) {
   const mutationCtx: RunMutationCtx = {
-    runMutation: (mutation, args) => t.mutation(mutation, args),
+    // `any` bridges convex-test's rest-arg signature to the facade's ctx type.
+    runMutation: (mutation: any, args: any) => t.mutation(mutation, args),
   };
   const queryCtx: RunQueryCtx = {
-    runQuery: (query, args) => t.query(query, args),
+    runQuery: (query: any, args: any) => t.query(query, args),
   };
-  return { mutationCtx, queryCtx, ctx: { ...mutationCtx, ...queryCtx } };
+  return { mutationCtx, queryCtx };
 }
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe("SecretStore client", () => {
-  test("constructs a typed client", () => {
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
-
-    expect(client).toBeInstanceOf(SecretStore);
-    expect(client.options.activeVersion).toBe(1);
-  });
-
-  test("put/get round-trips a secret value", async () => {
+describe("SecretStore facade", () => {
+  test("put and get round-trip through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
-    const client = new SecretStore<{
-      namespace: string;
-      metadata: { provider: string };
-    }>(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const secrets = new SecretStore<string, { provider: string }>(
+      components.secretStore,
+    );
 
-    const created = await client.put(mutationCtx, {
+    const created = await secrets.put(mutationCtx, {
       namespace: "acme:production",
       name: "openai",
       value: "sk-secret",
       metadata: { provider: "openai" },
     });
-
     expect(created.isNew).toBe(true);
 
-    const loaded = await client.get(queryCtx, {
+    const result = await secrets.get(queryCtx, {
       namespace: "acme:production",
       name: "openai",
     });
-
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    expect(loaded.value).toBe("sk-secret");
-    expect(loaded.metadata).toEqual({ provider: "openai" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe("sk-secret");
+      expect(result.metadata).toEqual({ provider: "openai" });
+    }
   });
 
-  test("returns key_version_unavailable when ciphertext version is not configured", async () => {
+  test("get returns a discriminated not_found result", async () => {
+    const t = initConvexTest();
+    const { queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    const result = await secrets.get(queryCtx, { name: "missing" });
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  test("getOrThrow returns the decrypted payload", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
-    const initial = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const secrets = new SecretStore(components.secretStore);
 
-    await initial.put(mutationCtx, {
-      name: "stripe",
-      value: "sk_live_123",
-    });
-
-    const rotatedOut = new SecretStore(components.secretStore, {
-      keys: [{ version: 2, value: KEY_V2 }],
-    });
-
-    const result = await rotatedOut.get(queryCtx, { name: "stripe" });
-    expect(result).toEqual({ ok: false, reason: "key_version_unavailable" });
+    await secrets.put(mutationCtx, { name: "openai", value: "sk-secret" });
+    const success = await secrets.getOrThrow(queryCtx, { name: "openai" });
+    expect(success.value).toBe("sk-secret");
   });
 
-  test("rotateKeys rewraps rows to the active version", async () => {
+  test("getOrThrow throws a typed error when the secret is missing", async () => {
     const t = initConvexTest();
-    const { mutationCtx, queryCtx, ctx } = ctxFrom(t);
-    const v1Client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const { queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
 
-    await v1Client.put(mutationCtx, {
-      name: "resend",
-      value: "re_123",
-    });
-
-    const rotatingClient = new SecretStore(components.secretStore, {
-      keys: [
-        { version: 2, value: KEY_V2 },
-        { version: 1, value: KEY_V1 },
-      ],
-    });
-
-    const rotated = await rotatingClient.rotateKeys(ctx, {
-      fromVersion: 1,
-      batchSize: 10,
-      cursor: null,
-    });
-
-    expect(rotated.processed).toBe(1);
-    expect(rotated.rotated).toBe(1);
-    expect(rotated.skipped).toBe(0);
-
-    const listed = await rotatingClient.list(queryCtx, {
-      paginationOpts: { numItems: 10, cursor: null },
-    });
-    expect(listed.page[0]?.keyVersion).toBe(2);
-
-    const activeOnlyClient = new SecretStore(components.secretStore, {
-      keys: [{ version: 2, value: KEY_V2 }],
-    });
-    const loaded = await activeOnlyClient.get(queryCtx, { name: "resend" });
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    expect(loaded.value).toBe("re_123");
+    const error = await secrets
+      .getOrThrow(queryCtx, { name: "missing" })
+      .catch((caught: unknown) => caught);
+    expect(isSecretStoreError(error)).toBe(true);
+    if (isSecretStoreError(error)) {
+      expect(error.data.code).toBe("not_found");
+    }
   });
 
-  test("rotateKeys does not report done when a stale row still remains on the old version", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-09T12:00:00.000Z"));
-
+  test("get.ok reports presence through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
-    const v1Client = new SecretStore<{
-      metadata: { owner?: string };
-    }>(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const secrets = new SecretStore(components.secretStore);
 
-    await v1Client.put(mutationCtx, {
-      name: "github",
-      value: "ghp_123",
-      metadata: { owner: "platform" },
-    });
-
-    const rotatingClient = new SecretStore<{
-      metadata: { owner?: string };
-    }>(components.secretStore, {
-      keys: [
-        { version: 2, value: KEY_V2 },
-        { version: 1, value: KEY_V1 },
-      ],
-    });
-
-    let injectedConcurrentUpdate = false;
-    const ctx: RunMutationCtx & RunQueryCtx = {
-      runQuery: (query, args) => t.query(query, args),
-      runMutation: async (mutation, args) => {
-        if (!injectedConcurrentUpdate) {
-          injectedConcurrentUpdate = true;
-          vi.setSystemTime(new Date("2026-03-09T12:00:01.000Z"));
-          await t.mutation(components.secretStore.lib.update, {
-            name: "github",
-            metadata: { owner: "rotated-later" },
-          });
-        }
-        return await t.mutation(mutation, args);
-      },
-    };
-
-    const result = await rotatingClient.rotateKeys(ctx, {
-      fromVersion: 1,
-      batchSize: 10,
-      cursor: null,
-    });
-
-    expect(result.processed).toBe(1);
-    expect(result.rotated).toBe(0);
-    expect(result.skipped).toBe(1);
-    expect(result.isDone).toBe(false);
-    expect(result.continueCursor).toBeNull();
-
-    const listed = await rotatingClient.list(queryCtx, {
-      paginationOpts: { numItems: 10, cursor: null },
-    });
-    expect(listed.page[0]?.keyVersion).toBe(1);
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(false);
+    await secrets.put(mutationCtx, { name: "openai", value: "sk" });
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(true);
   });
 
-  test("client rejects empty namespace", async () => {
+  test("isSecretStoreError narrows a secret-store ConvexError", async () => {
     const t = initConvexTest();
     const { mutationCtx } = ctxFrom(t);
-    const client = new SecretStore<{ namespace: string }>(
+    const secrets = new SecretStore(components.secretStore);
+
+    const error = await secrets
+      .put(mutationCtx, { namespace: "", name: "x", value: "v" })
+      .catch((caught: unknown) => caught);
+
+    expect(isSecretStoreError(error)).toBe(true);
+    if (isSecretStoreError(error)) {
+      expect(error.data.code).toBe("invalid_argument");
+    }
+  });
+
+  test("update and remove work through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore<string, { owner: string }>(
       components.secretStore,
-      {
-        keys: [{ version: 1, value: KEY_V1 }],
-      },
     );
 
-    await expect(
-      client.put(mutationCtx, {
-        namespace: "" as string,
-        name: "openai",
-        value: "sk-secret",
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
+    await secrets.put(mutationCtx, {
+      name: "openai",
+      value: "sk",
+      metadata: { owner: "platform" },
+    });
+    const updated = await secrets.update(mutationCtx, {
+      name: "openai",
+      metadata: { owner: "ops" },
+    });
+    expect(updated.updated).toBe(true);
+
+    const removed = await secrets.remove(mutationCtx, { name: "openai" });
+    expect(removed).toEqual({ removed: true });
+    expect((await secrets.get(queryCtx, { name: "openai" })).ok).toBe(false);
   });
 
-  test("has, update, and remove follow expected edge-result paths", async () => {
+  test("listEvents paginates audit events through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
+    const secrets = new SecretStore(components.secretStore);
 
-    expect(await client.has(queryCtx, { name: "missing" })).toBe(false);
-
-    expect(
-      await client.update(mutationCtx, {
-        name: "missing",
-        metadata: { owner: "nobody" },
-      }),
-    ).toEqual({ updated: false });
-
-    expect(await client.remove(mutationCtx, { name: "missing" })).toEqual({
-      removed: false,
-    });
-  });
-
-  test("listEvents rejects name + type in the client surface", async () => {
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
-    const ctx: RunQueryCtx = {
-      runQuery: async () => {
-        throw new Error("should not be called");
-      },
-    };
-
-    await expect(
-      client.listEvents(ctx, {
-        name: "openai",
-        type: "created",
-        paginationOpts: { numItems: 10, cursor: null },
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-  });
-
-  test("listEvents supports secretId lookups without namespace", async () => {
-    const t = initConvexTest();
-    const { mutationCtx, queryCtx } = ctxFrom(t);
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-    });
-
-    const created = await client.put(mutationCtx, {
-      name: "slack",
-      value: "xoxb-secret",
-    });
-
-    const events = await client.listEvents(queryCtx, {
-      secretId: created.secretId,
+    await secrets.put(mutationCtx, { name: "openai", value: "sk" });
+    const events = await secrets.listEvents(queryCtx, {
       paginationOpts: { numItems: 10, cursor: null },
     });
-
     expect(events.page).toHaveLength(1);
-    expect(events.page[0]?.secretId).toBe(created.secretId);
     expect(events.page[0]?.type).toBe("created");
   });
 
-  test("rotateKeys validates version and batch arguments", async () => {
-    const client = new SecretStore(components.secretStore, {
-      keys: [
-        { version: 2, value: KEY_V2 },
-        { version: 1, value: KEY_V1 },
-      ],
+  test("list paginates secrets through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+
+    await secrets.put(mutationCtx, {
+      namespace: "a:prod",
+      name: "one",
+      value: "v",
     });
-    const ctx = {} as RunMutationCtx & RunQueryCtx;
-
-    await expect(client.rotateKeys(ctx, { fromVersion: -1 })).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-
-    await expect(client.rotateKeys(ctx, { fromVersion: 2 })).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-
-    await expect(client.rotateKeys(ctx, { fromVersion: 9 })).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) &&
-        error.code === "KEY_VERSION_UNAVAILABLE",
-    );
-
-    await expect(
-      client.rotateKeys(ctx, { fromVersion: 1, batchSize: 0 }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-  });
-
-  test("cleanupSecrets and cleanupEvents validate retention arguments", async () => {
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
+    await secrets.put(mutationCtx, {
+      namespace: "a:prod",
+      name: "two",
+      value: "v",
     });
-    const ctx = {} as RunMutationCtx;
-
-    await expect(
-      client.cleanupSecrets(ctx, { retentionMs: 0 }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-
-    await expect(
-      client.cleanupEvents(ctx, { retentionMs: 0 }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isSecretStoreClientError(error) && error.code === "INVALID_ARGUMENT",
-    );
-  });
-});
-
-describe("error and option contracts", () => {
-  test("normalizeSecretStoreOptions validates keys and defaults", () => {
-    const normalized = normalizeSecretStoreOptions({
-      keys: [{ version: 7, value: KEY_V1 }],
-      defaults: { ttlMs: 60_000 },
-      logLevel: "debug",
+    const result = await secrets.list(queryCtx, {
+      namespace: "a:prod",
+      paginationOpts: { numItems: 10, cursor: null },
     });
-
-    expect(normalized.activeVersion).toBe(7);
-    expect(normalized.defaults.ttlMs).toBe(60_000);
-    expect(normalized.logLevel).toBe("debug");
+    expect(result.page).toHaveLength(2);
+    expect(result.page[0]?.effectiveState).toBe("active");
   });
 
-  test("constructor throws typed INVALID_OPTIONS", () => {
-    expect(
-      () =>
-        new SecretStore(components.secretStore, {
-          keys: [],
-        }),
-    ).toThrow(SecretStoreClientError);
-  });
+  test("rotate and isRotationComplete work through the facade", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
 
-  test("normalizeSecretStoreOptions rejects invalid key material and defaults", () => {
-    expect(() =>
-      normalizeSecretStoreOptions({
-        keys: [{ version: 1, value: "" }],
-      }),
-    ).toThrow(SecretStoreClientError);
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    await secrets.put(mutationCtx, { name: "k", value: "v" });
 
-    expect(() =>
-      normalizeSecretStoreOptions({
-        keys: [
-          { version: 1, value: KEY_V1 },
-          { version: 1, value: KEY_V2 },
-        ],
-      }),
-    ).toThrow(SecretStoreClientError);
-
-    expect(() =>
-      normalizeSecretStoreOptions({
-        keys: [{ version: 1, value: Buffer.alloc(16, 1).toString("base64") }],
-      }),
-    ).toThrow(SecretStoreClientError);
-
-    expect(() =>
-      normalizeSecretStoreOptions({
-        keys: [{ version: 1, value: KEY_V1 }],
-        defaults: { ttlMs: -1 },
-      }),
-    ).toThrow(SecretStoreClientError);
-  });
-
-  test("operation failures preserve cause", async () => {
-    const client = new SecretStore(components.secretStore, {
-      keys: [{ version: 1, value: KEY_V1 }],
-      logLevel: "none",
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({
+      1: RAW_V1,
+      2: RAW_V2,
     });
-    const ctx: RunQueryCtx = {
-      runQuery: async () => {
-        throw new Error("db down");
-      },
-    };
-
-    const error = await client.get(ctx, { name: "missing" }).catch((e) => e);
-    expect(isSecretStoreClientError(error)).toBe(true);
-    if (isSecretStoreClientError(error)) {
-      expect(error.code).toBe("OPERATION_FAILED");
-      expect(error.cause).toBeInstanceOf(Error);
-    }
-  });
-});
-
-test("client type contracts remain stable", () => {
-  const _baseClient = new SecretStore(components.secretStore, {
-    keys: [{ version: 1, value: KEY_V1 }],
+    expect(await secrets.isRotationComplete(queryCtx)).toBe(false);
+    const result = await secrets.rotate(mutationCtx);
+    expect(result.isDone).toBe(true);
+    expect(await secrets.isRotationComplete(queryCtx)).toBe(true);
   });
 
-  type BasePutArgs = Parameters<typeof _baseClient.put>[1];
-  const basePutArgs: BasePutArgs = {
-    name: "openai",
-    value: "sk",
-  };
-  void basePutArgs;
+  test("cleanup runs through the facade with default retention", async () => {
+    const t = initConvexTest();
+    const { mutationCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
 
-  const _namespacedClient = new SecretStore<{ namespace: `env:${string}` }>(
-    components.secretStore,
-    {
-      keys: [{ version: 1, value: KEY_V1 }],
-    },
-  );
+    const secretsResult = await secrets.cleanupSecrets(mutationCtx);
+    expect(secretsResult).toEqual({ deleted: 0, isDone: true });
 
-  type NamespacedPutArgs = Parameters<typeof _namespacedClient.put>[1];
-  const validNamespacedArgs: NamespacedPutArgs = {
-    namespace: "env:prod",
-    name: "openai",
-    value: "sk",
-  };
-  expectTypeOf(validNamespacedArgs.namespace).toEqualTypeOf<`env:${string}`>();
-
-  // @ts-expect-error namespace is required when configured in the generic.
-  const missingNamespace: NamespacedPutArgs = { name: "openai", value: "sk" };
-  void missingNamespace;
-
-  type NamespacedListArgs = Parameters<typeof _namespacedClient.list>[1];
-  const validNamespacedListArgs: NamespacedListArgs = {
-    namespace: "env:prod",
-    paginationOpts: { numItems: 10, cursor: null },
-  };
-  void validNamespacedListArgs;
-
-  // @ts-expect-error namespace is required for list when configured in the generic.
-  const missingListNamespace: NamespacedListArgs = {
-    paginationOpts: { numItems: 10, cursor: null },
-  };
-  void missingListNamespace;
-
-  type NamespacedListEventsArgs = Parameters<
-    typeof _namespacedClient.listEvents
-  >[1];
-  const validNamespacedListEventsArgs: NamespacedListEventsArgs = {
-    namespace: "env:prod",
-    paginationOpts: { numItems: 10, cursor: null },
-  };
-  void validNamespacedListEventsArgs;
-
-  // @ts-expect-error namespace is required for namespaced event listing unless querying by secretId.
-  const missingEventsNamespace: NamespacedListEventsArgs = {
-    paginationOpts: { numItems: 10, cursor: null },
-  };
-  void missingEventsNamespace;
-
-  const _metadataClient = new SecretStore<{
-    metadata: { provider: "openai" | "stripe"; label?: string };
-  }>(components.secretStore, {
-    keys: [{ version: 1, value: KEY_V1 }],
+    const eventsResult = await secrets.cleanupEvents(mutationCtx);
+    expect(eventsResult).toEqual({ deleted: 0, isDone: true });
   });
-
-  type MetadataPutArgs = Parameters<typeof _metadataClient.put>[1];
-  const metadataArgs: MetadataPutArgs = {
-    name: "stripe",
-    value: "sk",
-    metadata: { provider: "stripe", label: "primary" },
-  };
-  expectTypeOf(metadataArgs.metadata?.provider).toEqualTypeOf<
-    "openai" | "stripe" | undefined
-  >();
 });

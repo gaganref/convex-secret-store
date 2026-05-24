@@ -4,196 +4,18 @@ import type {
   FunctionReturnType,
   FunctionVisibility,
 } from "convex/server";
-import type { SecretEventType } from "../shared.js";
 import type { ComponentApi } from "../component/_generated/component.js";
+import type { SecretEventType } from "../shared.js";
 
-type PutMutationResult = FunctionReturnType<ComponentApi["lib"]["put"]>;
-type GetQueryResult = FunctionReturnType<ComponentApi["lib"]["get"]>;
-type ListQueryResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
-type ListEventsQueryResult = FunctionReturnType<
-  ComponentApi["lib"]["listEvents"]
->;
-type CleanupSecretsMutationResult = FunctionReturnType<
-  ComponentApi["cleanup"]["cleanupSecrets"]
->;
-type CleanupEventsMutationResult = FunctionReturnType<
-  ComponentApi["cleanup"]["cleanupEvents"]
->;
-
-export type SecretStoreTypeOptions = {
-  namespace?: string;
-  metadata?: Record<string, unknown>;
+/** A context that can run component queries (query, mutation, or action ctx). */
+export type RunQueryCtx = {
+  runQuery: <Query extends FunctionReference<"query", FunctionVisibility>>(
+    query: Query,
+    args: FunctionArgs<Query>,
+  ) => Promise<FunctionReturnType<Query>>;
 };
 
-type NamespaceArg<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  namespace: infer N extends string;
-}
-  ? { namespace: N }
-  : { namespace?: never };
-
-type NamespaceOutput<TOptions extends SecretStoreTypeOptions> =
-  TOptions extends {
-    namespace: infer N extends string;
-  }
-    ? N | undefined
-    : undefined;
-
-type MetadataInput<TOptions extends SecretStoreTypeOptions> = TOptions extends {
-  metadata: infer M extends Record<string, unknown>;
-}
-  ? M
-  : Record<string, unknown>;
-
-type MetadataOutput<TOptions extends SecretStoreTypeOptions> =
-  TOptions extends {
-    metadata: infer M extends Record<string, unknown>;
-  }
-    ? M | undefined
-    : Record<string, unknown> | undefined;
-
-type ListItemBase = ListQueryResult["page"][number];
-type EventItemBase = ListEventsQueryResult["page"][number];
-type GetFailureBase = Extract<GetQueryResult, { ok: false }>;
-
-export type SecretId = PutMutationResult["secretId"];
-
-export type PaginationOptions = {
-  numItems: number;
-  cursor: string | null;
-};
-
-export type PutArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-  value: string;
-  metadata?: MetadataInput<TOptions> | null;
-  ttlMs?: number | null;
-};
-
-export type PutResult = PutMutationResult;
-
-export type GetArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type GetResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> =
-  | {
-      ok: true;
-      value: string;
-      metadata: MetadataOutput<TOptions>;
-      expiresAt?: number;
-      updatedAt: number;
-    }
-  | GetFailureBase
-  | { ok: false; reason: "key_version_unavailable" };
-
-export type HasArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type RemoveArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-};
-
-export type RemoveResult = FunctionReturnType<ComponentApi["lib"]["remove"]>;
-
-export type UpdateArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  name: string;
-  metadata?: MetadataInput<TOptions> | null;
-  expiresAt?: number | null;
-};
-
-export type UpdateResult = FunctionReturnType<ComponentApi["lib"]["update"]>;
-
-export type ListArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  paginationOpts: PaginationOptions;
-  order?: "asc" | "desc";
-};
-
-export type ListResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = Omit<ListQueryResult, "page"> & {
-  page: Array<
-    Omit<ListItemBase, "metadata" | "namespace"> & {
-      metadata: MetadataOutput<TOptions>;
-      namespace?: NamespaceOutput<TOptions>;
-    }
-  >;
-};
-
-type ListEventsBySecretIdArgs = {
-  secretId: SecretId;
-  name?: never;
-  type?: never;
-};
-
-type ListEventsByNamespaceArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = NamespaceArg<TOptions> & {
-  secretId?: never;
-  name?: string;
-  type?: SecretEventType;
-};
-
-export type ListEventsArgs<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = {
-  paginationOpts: PaginationOptions;
-  order?: "asc" | "desc";
-} & (ListEventsBySecretIdArgs | ListEventsByNamespaceArgs<TOptions>);
-
-export type ListEventsResult<
-  TOptions extends SecretStoreTypeOptions = Record<never, never>,
-> = Omit<ListEventsQueryResult, "page"> & {
-  page: Array<
-    Omit<EventItemBase, "namespace"> & {
-      namespace?: NamespaceOutput<TOptions>;
-    }
-  >;
-};
-
-export type RotateKeysArgs = {
-  fromVersion: number;
-  batchSize?: number;
-  cursor?: string | null;
-  order?: "asc" | "desc";
-};
-
-export type RotateKeysResult = {
-  fromVersion: number;
-  toVersion: number;
-  processed: number;
-  rotated: number;
-  skipped: number;
-  isDone: boolean;
-  continueCursor: string | null;
-};
-
-export type CleanupSecretsArgs = {
-  retentionMs?: number;
-};
-
-export type CleanupSecretsResult = CleanupSecretsMutationResult;
-
-export type CleanupEventsArgs = {
-  retentionMs?: number;
-};
-
-export type CleanupEventsResult = CleanupEventsMutationResult;
-
+/** A context that can run component mutations (mutation or action ctx). */
 export type RunMutationCtx = {
   runMutation: <
     Mutation extends FunctionReference<"mutation", FunctionVisibility>,
@@ -203,11 +25,154 @@ export type RunMutationCtx = {
   ) => Promise<FunctionReturnType<Mutation>>;
 };
 
-export type RunQueryCtx = {
-  runQuery: <Query extends FunctionReference<"query", FunctionVisibility>>(
-    query: Query,
-    args: FunctionArgs<Query>,
-  ) => Promise<FunctionReturnType<Query>>;
+type PutComponentResult = FunctionReturnType<ComponentApi["lib"]["put"]>;
+
+/** The id of a stored secret. */
+export type SecretId = PutComponentResult["secretId"];
+
+/** Arguments for `SecretStore.put`. */
+export type PutArgs<
+  Namespace extends string,
+  Metadata extends Record<string, unknown>,
+> = {
+  namespace?: Namespace;
+  name: string;
+  value: string;
+  metadata?: Metadata | null;
+  ttlMs?: number | null;
 };
 
-export type RunReadWriteCtx = RunMutationCtx & RunQueryCtx;
+/** Result of `SecretStore.put`. */
+export type PutResult = PutComponentResult;
+
+/** Arguments for `SecretStore.get` and `SecretStore.getOrThrow`. */
+export type GetArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  name: string;
+};
+
+/** The decrypted payload of a successful read. */
+export type GetSuccess<Metadata extends Record<string, unknown>> = {
+  value: string;
+  metadata: Metadata | undefined;
+  expiresAt?: number;
+  updatedAt: number;
+};
+
+/** Result of `SecretStore.get` — a discriminated success/failure union. */
+export type GetResult<Metadata extends Record<string, unknown>> =
+  | ({ ok: true } & GetSuccess<Metadata>)
+  | { ok: false; reason: "not_found" | "expired" | "key_unavailable" };
+
+/** Arguments for `SecretStore.update`. */
+export type UpdateArgs<
+  Namespace extends string,
+  Metadata extends Record<string, unknown>,
+> = {
+  namespace?: Namespace;
+  name: string;
+  metadata?: Metadata | null;
+  ttlMs?: number | null;
+};
+
+/** Result of `SecretStore.update`. */
+export type UpdateResult = FunctionReturnType<ComponentApi["lib"]["update"]>;
+
+/** Arguments for `SecretStore.remove`. */
+export type RemoveArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  name: string;
+};
+
+/** Result of `SecretStore.remove`. */
+export type RemoveResult = FunctionReturnType<ComponentApi["lib"]["remove"]>;
+
+/** Cursor-based pagination options. */
+export type PaginationOptions = {
+  numItems: number;
+  cursor: string | null;
+};
+
+type ListEventsBase = {
+  paginationOpts: PaginationOptions;
+  order?: "asc" | "desc";
+};
+
+/**
+ * Arguments for `SecretStore.listEvents`. A discriminated union that mirrors
+ * the runtime constraints:
+ *
+ * - `secretId` alone — no other filter may combine with it.
+ * - `namespace` alone (or omitted, meaning the default namespace).
+ * - `namespace + name` — events for one secret name in a namespace.
+ * - `namespace + type` — events of one type in a namespace.
+ *
+ * In all `namespace`-filtered variants, omitting `namespace` means the default
+ * namespace (matching the rest of the API). `name` and `type` cannot combine,
+ * and neither can mix with `secretId`.
+ */
+export type ListEventsArgs<Namespace extends string> =
+  | (ListEventsBase & {
+      secretId: SecretId;
+      namespace?: never;
+      name?: never;
+      type?: never;
+    })
+  | (ListEventsBase & {
+      namespace?: Namespace;
+      name?: never;
+      type?: never;
+      secretId?: never;
+    })
+  | (ListEventsBase & {
+      namespace?: Namespace;
+      name: string;
+      type?: never;
+      secretId?: never;
+    })
+  | (ListEventsBase & {
+      namespace?: Namespace;
+      type: SecretEventType;
+      name?: never;
+      secretId?: never;
+    });
+
+/** Result of `SecretStore.listEvents`. */
+export type ListEventsResult = FunctionReturnType<
+  ComponentApi["lib"]["listEvents"]
+>;
+
+/** Arguments for `SecretStore.list`. */
+export type ListArgs<Namespace extends string> = {
+  namespace?: Namespace;
+  paginationOpts: PaginationOptions;
+  order?: "asc" | "desc";
+};
+
+type RawListResult = FunctionReturnType<ComponentApi["lib"]["list"]>;
+
+/** One secret in a `SecretStore.list` page. */
+export type ListItem<Metadata extends Record<string, unknown>> = Omit<
+  RawListResult["page"][number],
+  "metadata"
+> & { metadata: Metadata | undefined };
+
+/** Result of `SecretStore.list`. */
+export type ListResult<Metadata extends Record<string, unknown>> = {
+  page: Array<ListItem<Metadata>>;
+  isDone: boolean;
+  continueCursor: string;
+};
+
+/** Result of `SecretStore.rotate`. */
+export type RotateResult = FunctionReturnType<ComponentApi["lib"]["rotate"]>;
+
+/** Arguments for `SecretStore.cleanupSecrets` and `SecretStore.cleanupEvents`. */
+export type CleanupArgs = {
+  retentionMs?: number;
+};
+
+/** Result of `SecretStore.cleanupSecrets` and `SecretStore.cleanupEvents`. */
+export type CleanupResult = FunctionReturnType<
+  ComponentApi["cleanup"]["cleanupSecrets"]
+>;

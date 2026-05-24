@@ -1,14 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { initConvexTest } from "./setup.test";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
+import { defineKeys } from "../../src/client/index.js";
+import { resetKeyConfig } from "../../src/component/keys.js";
 
-describe("example", () => {
+const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
+
+describe("example app", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    resetKeyConfig();
+    delete process.env.SECRET_STORE_KEYS;
   });
 
   test("putSecret stores a secret and records activity", async () => {
@@ -19,7 +27,6 @@ describe("example", () => {
       name: "DATABASE_URL",
       value: "postgresql://user:pass@db.example.com:5432/myapp",
     });
-
     expect(created.secretId).toBeDefined();
 
     const secrets = await t.query(api.example.listSecrets, {
@@ -36,72 +43,6 @@ describe("example", () => {
       paginationOpts: { numItems: 20, cursor: null },
     });
     expect(events.page[0]?.type).toBe("created");
-  });
-
-  test("seedLegacySecret and runRotationBatch move a secret to the active version", async () => {
-    const t = initConvexTest();
-    await t.mutation(api.example.seedLegacySecret, {
-      workspace: "acme",
-      environment: "production",
-      name: "JWT_SIGNING_KEY",
-      value: "legacy-key-value",
-    });
-
-    const before = await t.query(api.example.getSettingsSnapshot, {
-      workspace: "acme",
-      environment: "production",
-    });
-    expect(before.versionCounts).toContainEqual({ keyVersion: 1, count: 1 });
-
-    const rotated = await t.mutation(api.example.runRotationBatch, {
-      fromVersion: 1,
-      batchSize: 20,
-      cursor: null,
-    });
-    expect(rotated.rotated).toBe(1);
-
-    const after = await t.query(api.example.getSettingsSnapshot, {
-      workspace: "acme",
-      environment: "production",
-    });
-    expect(after.versionCounts).toContainEqual({ keyVersion: 2, count: 1 });
-  });
-
-  test("rotation helpers drain one version or all old versions", async () => {
-    const t = initConvexTest();
-    await t.mutation(api.example.seedLegacySecret, {
-      workspace: "acme",
-      environment: "production",
-      name: "JWT_SIGNING_KEY",
-      value: "legacy-key-value",
-    });
-
-    const singleVersion = await t.action(
-      internal.rotate.rotateSecretStoreVersion,
-      { fromVersion: 1 },
-    );
-    expect(singleVersion.fromVersion).toBe(1);
-    expect(singleVersion.toVersion).toBe(2);
-    expect(singleVersion.rotated).toBe(1);
-
-    await t.mutation(api.example.seedLegacySecret, {
-      workspace: "acme",
-      environment: "production",
-      name: "JWT_SIGNING_KEY_2",
-      value: "legacy-key-value",
-    });
-
-    const allVersions = await t.action(
-      internal.rotate.rotateSecretStoreToLatest,
-    );
-    expect(allVersions.activeVersion).toBe(2);
-    expect(allVersions.drainedVersions).toContainEqual({
-      fromVersion: 1,
-      toVersion: 2,
-      processed: 1,
-      rotated: 1,
-      skipped: 0,
-    });
   });
 
   test("removeSecret deletes the secret", async () => {
@@ -142,37 +83,56 @@ describe("example", () => {
       environment: "production",
       name: "OPENAI_API_KEY",
     });
-
     expect(preview.resolution).toBe("active");
-    expect(preview.maskedValue).toContain("\u2022");
+    expect(preview.maskedValue).toContain("•");
     expect(preview.maskedValue).not.toContain("sk-live-secret-1234");
   });
 
-  test("seedDemoData populates environment with sample secrets", async () => {
+  test("seedDemoData populates the scope and is idempotent", async () => {
     const t = initConvexTest();
-    const result = await t.mutation(api.example.seedDemoData, {
+    const first = await t.mutation(api.example.seedDemoData, {
       workspace: "acme",
       environment: "development",
     });
+    expect(first.seeded).toBe(5);
 
-    expect(result.seeded).toBe(6);
-
-    const secrets = await t.query(api.example.listSecrets, {
-      workspace: "acme",
-      environment: "development",
-      paginationOpts: { numItems: 20, cursor: null },
-    });
-    expect(secrets.page.length).toBe(6);
-
-    // Re-seeding should not create duplicates
-    const result2 = await t.mutation(api.example.seedDemoData, {
+    const second = await t.mutation(api.example.seedDemoData, {
       workspace: "acme",
       environment: "development",
     });
-    expect(result2.seeded).toBe(0);
+    expect(second.seeded).toBe(0);
   });
 
-  test("runCleanup and runEventCleanup expose the split maintenance operations", async () => {
+  test("getSettingsSnapshot summarizes the scope", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.seedDemoData, {
+      workspace: "acme",
+      environment: "production",
+    });
+
+    const snapshot = await t.query(api.example.getSettingsSnapshot, {
+      workspace: "acme",
+      environment: "production",
+    });
+    expect(snapshot.totalSecrets).toBe(5);
+    expect(snapshot.expiredSecrets).toBe(0);
+    expect(snapshot.rotationComplete).toBe(true);
+    expect(snapshot.versionCounts).toContainEqual({ keyVersion: 1, count: 5 });
+  });
+
+  test("runRotation is a no-op when every secret is on the active key", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.example.putSecret, {
+      workspace: "acme",
+      environment: "production",
+      name: "k",
+      value: "v",
+    });
+    const result = await t.mutation(api.example.runRotation, {});
+    expect(result).toEqual({ rotated: 0, skipped: 0, isDone: true });
+  });
+
+  test("runCleanup and runEventCleanup remove expired data", async () => {
     const t = initConvexTest();
     await t.mutation(api.example.putSecret, {
       workspace: "acme",
@@ -182,7 +142,7 @@ describe("example", () => {
       ttlMs: 1,
     });
 
-    vi.setSystemTime(new Date("2026-10-10T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
 
     const secretCleanup = await t.mutation(api.example.runCleanup, {
       retentionMs: 24 * 60 * 60 * 1000,

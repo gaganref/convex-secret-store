@@ -9,6 +9,10 @@
  */
 
 import type * as cleanup from "../cleanup.js";
+import type * as crypto from "../crypto.js";
+import type * as events from "../events.js";
+import type * as expiry from "../expiry.js";
+import type * as keys from "../keys.js";
 import type * as lib from "../lib.js";
 
 import type {
@@ -20,6 +24,10 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   cleanup: typeof cleanup;
+  crypto: typeof crypto;
+  events: typeof events;
+  expiry: typeof expiry;
+  keys: typeof keys;
   lib: typeof lib;
 }> = anyApi as any;
 

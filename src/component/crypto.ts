@@ -1,9 +1,27 @@
-import { invalidArgumentError, runtimeUnavailableError } from "./errors.js";
-import { decodeBase64, encodeBase64 } from "./base64.js";
+/**
+ * Envelope encryption for the secret store.
+ *
+ * Each secret value is encrypted with a fresh per-secret data-encryption key
+ * (DEK); the DEK is wrapped under a versioned key-encryption key (KEK). AES-GCM
+ * additional authenticated data binds ciphertext to its namespace and name (and
+ * the wrapped DEK additionally to its key version), so ciphertext cannot be
+ * relocated between rows.
+ *
+ * This module is pure given its inputs and contains no Convex bindings — it is
+ * the isolated, unit-tested core of the component's cryptography.
+ */
+
+import { decodeBase64, encodeBase64 } from "../base64.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+// WebCrypto's `subtle.{encrypt,decrypt,importKey,...}` require a strict
+// `BufferSource` whose backing buffer is `ArrayBuffer` (not `SharedArrayBuffer`
+// or a generic `ArrayBufferLike`). Copying into a fresh `Uint8Array` is the
+// cheapest way to guarantee both the runtime invariant and the TS narrowing.
+// Cost is small (one allocation per crypto call, ~12B/IV + ~50B/AAD + payload)
+// and dwarfed by the AES-GCM op itself — do not "optimize" this copy away.
 function asBufferSource(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -15,7 +33,7 @@ function getRuntimeCrypto(): Crypto {
     typeof globalThis.crypto === "undefined" ||
     typeof globalThis.crypto.subtle === "undefined"
   ) {
-    throw runtimeUnavailableError("Web Crypto API is unavailable");
+    throw new Error("secret-store: Web Crypto API is unavailable");
   }
   return globalThis.crypto;
 }
@@ -61,7 +79,7 @@ export function buildDekAAD(
 export async function importKey(rawKeyBase64: string): Promise<CryptoKey> {
   const bytes = decodeBase64(rawKeyBase64);
   if (bytes.byteLength !== 32) {
-    throw invalidArgumentError("KEK must decode to exactly 32 bytes");
+    throw new Error("secret-store: KEK must decode to exactly 32 bytes");
   }
   return await getRuntimeCrypto().subtle.importKey(
     "raw",

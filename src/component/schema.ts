@@ -15,13 +15,14 @@ export const secretsFields = {
   updatedAt: v.number(),
 };
 
+// Audit events are append-only; their timestamp is the document's
+// `_creationTime`, so every index is implicitly chronological.
 export const secretEventsFields = {
   secretId: v.id("secrets"),
   namespace: v.optional(v.string()),
   name: v.string(),
   type: secretEventTypeValidator,
   metadata: v.optional(metadataValidator),
-  createdAt: v.number(),
 };
 
 export default defineSchema({
@@ -32,17 +33,8 @@ export default defineSchema({
     .index("by_expires_at", ["expiresAt"]),
 
   secretEvents: defineTable(secretEventsFields)
-    .index("by_secret_id_and_created_at", ["secretId", "createdAt"])
-    .index("by_namespace_and_created_at", ["namespace", "createdAt"])
-    .index("by_namespace_and_name_and_created_at", [
-      "namespace",
-      "name",
-      "createdAt",
-    ])
-    .index("by_namespace_and_type_and_created_at", [
-      "namespace",
-      "type",
-      "createdAt",
-    ])
-    .index("by_created_at", ["createdAt"]),
+    .index("by_secret_id", ["secretId"])
+    .index("by_namespace", ["namespace"])
+    .index("by_namespace_and_name", ["namespace", "name"])
+    .index("by_namespace_and_type", ["namespace", "type"]),
 });
