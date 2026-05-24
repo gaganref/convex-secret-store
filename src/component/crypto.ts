@@ -16,6 +16,12 @@ import { decodeBase64, encodeBase64 } from "../base64.js";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+// WebCrypto's `subtle.{encrypt,decrypt,importKey,...}` require a strict
+// `BufferSource` whose backing buffer is `ArrayBuffer` (not `SharedArrayBuffer`
+// or a generic `ArrayBufferLike`). Copying into a fresh `Uint8Array` is the
+// cheapest way to guarantee both the runtime invariant and the TS narrowing.
+// Cost is small (one allocation per crypto call, ~12B/IV + ~50B/AAD + payload)
+// and dwarfed by the AES-GCM op itself — do not "optimize" this copy away.
 function asBufferSource(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);

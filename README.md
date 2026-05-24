@@ -228,7 +228,9 @@ await secrets.update(ctx, {
 ```
 
 Edits `metadata` and/or expiry **without** re-encrypting the value. Omitted
-fields are preserved; `null` clears.
+fields are preserved; `null` clears. At least one of `metadata` or `ttlMs`
+must be supplied — calling with neither throws `invalid_argument`.
+`{ updated: false }` means the secret does not exist (symmetric with `remove`).
 
 ### `remove`
 
@@ -258,15 +260,15 @@ await secrets.listEvents(ctx, {
   paginationOpts,
   // one of:
   secretId?,
-  namespace?,
-  name?,                          // requires `namespace`
-  type?: "created" | "updated" | "deleted" | "rotated",  // requires `namespace`
+  namespace?,                     // omit for the default namespace
+  name?,                          // optionally narrows within `namespace`
+  type?: "created" | "updated" | "deleted" | "rotated",  // optionally narrows within `namespace`
   order?,
 });
 ```
 
-V1 restrictions: `secretId` cannot combine with `namespace`/`name`/`type`; `name`
-and `type` cannot combine with each other.
+`secretId` cannot combine with `namespace`/`name`/`type`; `name` and `type`
+cannot combine with each other.
 
 ### `rotate`
 
@@ -309,14 +311,15 @@ recurring cron.
 ## Expiry
 
 ```
-expiresAt = ttlMs                       if ttlMs is a number
+expiresAt = now + ttlMs                 if ttlMs is a positive integer
           = no expiry                   if ttlMs is null
           = now + SECRET_STORE_DEFAULT_TTL_MS  if ttlMs is omitted and a default is set
           = no expiry                   otherwise
 ```
 
-Expiry is **recomputed on every `put`** (ADR 0003). To change expiry without
-rewriting the value, use `update`.
+`ttlMs` (and `SECRET_STORE_DEFAULT_TTL_MS`) must be a positive integer — `0`
+is rejected. Expiry is **recomputed on every `put`** (ADR 0003); use `update`
+to change expiry without rewriting the value.
 
 ## Key rotation
 
@@ -355,6 +358,13 @@ triggered.
    declared as required in the app definition.
 
 A new `rotated` audit event is recorded per row.
+
+> **KEK material is immutable per version.** To rotate, *add* a new version
+> (`MY_APP_KEK_V2`) — never overwrite the material under an existing version
+> number. Replacing the bytes under `MY_APP_KEK_V1` while rows still reference
+> it is unsupported: reads of those rows will throw `decryption_failed`, and
+> `rotate` will skip them with a warning. Recovery requires restoring the
+> original material under that version, or `remove`-ing the affected rows.
 
 ## Cleanup crons
 

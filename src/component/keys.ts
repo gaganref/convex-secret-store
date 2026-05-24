@@ -49,11 +49,9 @@ function parseDefaultTtlMs(raw: string | undefined): number | null {
 }
 
 function loadConfig(): KeyConfig {
-  // Both env vars are declared in `defineComponent({ env })`, so Convex
-  // validates `SECRET_STORE_KEYS` is present at push time and refuses to
-  // delete it. Widening to `string | undefined` keeps a defensive guard for
-  // the edge case where the value is set but empty (the validator allows
-  // empty strings — we don't).
+  // Convex validates `SECRET_STORE_KEYS` is present at push time via
+  // `defineComponent({ env })`, but the validator still permits an empty
+  // string; we treat empty as missing below.
   const rawKeys = env.SECRET_STORE_KEYS;
   const rawTtl = env.SECRET_STORE_DEFAULT_TTL_MS;
 

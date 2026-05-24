@@ -180,6 +180,28 @@ describe("component lib — put, get, has", () => {
     expect(result).toEqual({ ok: false, reason: "expired" });
   });
 
+  test("get throws decryption_failed when ciphertext has been tampered with", async () => {
+    const t = initConvexTest();
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+
+    // Corrupt the stored ciphertext byte-for-byte. The KEK is still valid,
+    // version is still configured, expiry is fine — but AES-GCM's auth tag
+    // check will fail on decrypt and `get` should surface that as a thrown
+    // `decryption_failed`, not as a clean `{ ok: false }`.
+    await t.run(async (ctx) => {
+      const row = await ctx.db.get(created.secretId);
+      if (row === null) throw new Error("row vanished");
+      // Flip the first base64 character of the wrapped DEK.
+      const flipped =
+        (row.wrappedDEK[0] === "A" ? "B" : "A") + row.wrappedDEK.slice(1);
+      await ctx.db.patch(created.secretId, { wrappedDEK: flipped });
+    });
+
+    await expect(
+      t.query(api.lib.get, { name: "k", now: Date.now() }),
+    ).rejects.toThrow(/decryption_failed|failed to decrypt/);
+  });
+
   test("ttlMs omitted uses the configured default TTL", async () => {
     process.env.SECRET_STORE_DEFAULT_TTL_MS = "60000";
     resetKeyConfig();
@@ -300,11 +322,12 @@ describe("component lib — update and remove", () => {
     expect(result).toEqual({ updated: false });
   });
 
-  test("update with nothing to change returns updated:false", async () => {
+  test("update with neither metadata nor ttlMs throws invalid_argument", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "k", value: "v" });
-    const result = await t.mutation(api.lib.update, { name: "k" });
-    expect(result).toEqual({ updated: false });
+    await expect(
+      t.mutation(api.lib.update, { name: "k" }),
+    ).rejects.toThrow(/at least one of metadata or ttlMs/);
   });
 
   test("remove deletes a secret", async () => {
@@ -349,10 +372,18 @@ describe("component lib — audit events", () => {
     ]);
   });
 
-  test("update records an updated event", async () => {
+  test("update records an updated event with a changed-fields diff", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "k", value: "v" });
+
     await t.mutation(api.lib.update, { name: "k", metadata: { o: "x" } });
+    await t.mutation(api.lib.update, { name: "k", ttlMs: 60_000 });
+    await t.mutation(api.lib.update, {
+      name: "k",
+      metadata: { o: "y" },
+      ttlMs: 120_000,
+    });
+
     const events = await t.query(api.lib.listEvents, {
       paginationOpts: { numItems: 10, cursor: null },
       order: "asc",
@@ -360,7 +391,14 @@ describe("component lib — audit events", () => {
     expect(events.page.map((event) => event.type)).toEqual([
       "created",
       "updated",
+      "updated",
+      "updated",
     ]);
+    expect(events.page[1]?.metadata).toEqual({ changed: ["metadata"] });
+    expect(events.page[2]?.metadata).toEqual({ changed: ["ttl"] });
+    expect(events.page[3]?.metadata).toEqual({
+      changed: ["metadata", "ttl"],
+    });
   });
 
   test("remove records a deleted event with a reason", async () => {
@@ -659,6 +697,27 @@ describe("component lib — rotation", () => {
     expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
 
     // Row left untouched — still on its retired keyVersion.
+    const row = await t.run((ctx) => ctx.db.get(created.secretId));
+    expect(row?.keyVersion).toBe(1);
+  });
+
+  test("rotate skips rows when v1 material has been replaced (unsupported)", async () => {
+    const t = initConvexTest();
+    // Operator misconfiguration: replace the bytes under version 1 while a
+    // row still references it (KEK material is contractually immutable; this
+    // is the "material changed under the same version" scenario). The
+    // hasVersion check passes (v1 is still configured) but rewrap fails
+    // because the wrappedDEK was produced under the original bytes.
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    const created = await t.mutation(api.lib.put, { name: "k", value: "v" });
+
+    resetKeyConfig();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V2, 2: RAW_V1 });
+
+    const result = await t.mutation(api.lib.rotate, {});
+    expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
+
     const row = await t.run((ctx) => ctx.db.get(created.secretId));
     expect(row?.keyVersion).toBe(1);
   });

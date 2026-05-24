@@ -291,10 +291,12 @@ export const list = query({
 /**
  * Update a secret's metadata or expiry without re-encrypting its value.
  *
- * Omitted fields are preserved; pass `null` to clear `metadata` or expiry, or
- * `ttlMs` to set expiry to `now + ttlMs`. Returns `updated: false` when the
- * secret does not exist or nothing was supplied to change. Records an
- * `updated` audit event when a change is applied.
+ * Pass `null` to clear `metadata` or expiry, or `ttlMs` to set expiry to
+ * `now + ttlMs`. Omitted fields are preserved. At least one of `metadata` or
+ * `ttlMs` must be supplied — calling with neither throws `invalid_argument`
+ * (almost always a caller bug). Returns `updated: false` only when the secret
+ * does not exist (symmetric with `remove`). Records an `updated` audit event
+ * when a change is applied.
  */
 export const update = mutation({
   args: {
@@ -312,7 +314,10 @@ export const update = mutation({
     assertValidNamespace(args.namespace);
     assertValidName(args.name);
     if (args.metadata === undefined && args.ttlMs === undefined) {
-      return { updated: false as const };
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "update requires at least one of metadata or ttlMs",
+      });
     }
     const secret = await findSecret(ctx, args.namespace, args.name);
     if (secret === null) {
@@ -330,11 +335,14 @@ export const update = mutation({
       metadata?: Record<string, unknown>;
       expiresAt?: number;
     } = { updatedAt: now };
+    const changed: Array<"metadata" | "ttl"> = [];
     if (args.metadata !== undefined) {
       patch.metadata = args.metadata === null ? undefined : args.metadata;
+      changed.push("metadata");
     }
     if (args.ttlMs !== undefined) {
       patch.expiresAt = nextExpiresAt;
+      changed.push("ttl");
     }
     await ctx.db.patch(secret._id, patch);
     await recordEvent(ctx, {
@@ -342,6 +350,7 @@ export const update = mutation({
       namespace: secret.namespace,
       name: secret.name,
       type: "updated",
+      metadata: { changed },
     });
 
     return {
@@ -395,8 +404,8 @@ const eventItemValidator = v.object({
  * Paginate audit events.
  *
  * Filter by `secretId`, or by `namespace` optionally narrowed with `name` or
- * `type`. V1 restrictions: `secretId` cannot combine with the other filters,
- * `name` and `type` cannot combine, and `name`/`type` require `namespace`.
+ * `type`. Omitting `namespace` targets the default namespace. `secretId`
+ * cannot combine with the other filters, and `name` and `type` cannot combine.
  */
 export const listEvents = query({
   args: {
@@ -515,12 +524,10 @@ export const rotate = mutation({
     let rotated = 0;
     let skipped = 0;
     for (const secret of stale) {
+      // Skip rather than throw — one orphan row must not poison the batch and
+      // wedge the rotation chain. Recovery is operator-side (re-add the KEK or
+      // `remove` the row); the count is surfaced via `skipped`.
       if (!hasVersion(secret.keyVersion)) {
-        // Operator misconfiguration: this row was wrapped under a KEK version
-        // that's since been retired from `SECRET_STORE_KEYS`. Skip the row so
-        // one orphan doesn't poison the whole batch; surface the count via
-        // `skipped`. Recovery: re-add the missing KEK and call `rotate` again,
-        // or `remove` the orphan row.
         console.warn(
           `secret-store: cannot rotate secret "${secret.name}" — ` +
             `keyVersion ${secret.keyVersion} is not configured. ` +
@@ -529,16 +536,30 @@ export const rotate = mutation({
         skipped++;
         continue;
       }
-      const rewrapped = await rewrapDEK({
-        wrappedDEK: secret.wrappedDEK,
-        dekIv: secret.dekIv,
-        namespace: secret.namespace,
-        name: secret.name,
-        fromVersion: secret.keyVersion,
-        toVersion: active,
-        fromKek: await getKEK(secret.keyVersion),
-        toKek,
-      });
+      let rewrapped;
+      try {
+        rewrapped = await rewrapDEK({
+          wrappedDEK: secret.wrappedDEK,
+          dekIv: secret.dekIv,
+          namespace: secret.namespace,
+          name: secret.name,
+          fromVersion: secret.keyVersion,
+          toVersion: active,
+          fromKek: await getKEK(secret.keyVersion),
+          toKek,
+        });
+      } catch {
+        // Version is configured but unwrap failed — almost always because the
+        // operator replaced the KEK material under the same version number
+        // (unsupported; versions are immutable).
+        console.warn(
+          `secret-store: cannot rotate secret "${secret.name}" — ` +
+            `rewrap under keyVersion ${secret.keyVersion} failed. ` +
+            `KEK material for that version may have been replaced.`,
+        );
+        skipped++;
+        continue;
+      }
       await ctx.db.patch(secret._id, {
         wrappedDEK: rewrapped.wrappedDEK,
         dekIv: rewrapped.dekIv,
@@ -554,9 +575,8 @@ export const rotate = mutation({
       rotated++;
     }
 
-    // If we couldn't make any progress this batch (only orphan rows remain),
-    // stop rescheduling — otherwise the chain spins forever. The operator
-    // must intervene (re-add the KEK or remove the orphans).
+    // No progress this batch means only orphan rows remain — stop rescheduling
+    // so the chain doesn't spin forever. Operator must intervene.
     const isDone = stale.length < ROTATION_BATCH_SIZE || rotated === 0;
     if (!isDone) {
       await ctx.scheduler.runAfter(0, api.lib.rotate, {});
@@ -575,9 +595,9 @@ export const isRotationComplete = query({
   returns: v.boolean(),
   handler: async (ctx) => {
     const active = activeVersion();
-    // Rotation is complete only when every row is on the active version.
-    // We check both directions because retiring the *highest* configured key
-    // (a misconfiguration) would leave rows with `keyVersion > active`.
+    // Check both directions: rows above the active version exist only if the
+    // operator retired the highest configured key (a misconfiguration), but
+    // they still mean rotation isn't complete.
     const below = await ctx.db
       .query("secrets")
       .withIndex("by_key_version", (q) => q.lt("keyVersion", active))

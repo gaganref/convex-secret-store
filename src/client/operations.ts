@@ -126,8 +126,9 @@ export class SecretStore<
 
   /**
    * Update a secret's metadata or expiry without re-encrypting its value.
-   *
-   * Omitted fields are preserved; pass `null` to clear `metadata` or expiry.
+   * Omitted fields are preserved; pass `null` to clear. At least one of
+   * `metadata` or `ttlMs` must be supplied — calling with neither throws
+   * `invalid_argument`. `{ updated: false }` means the secret does not exist.
    */
   async update(
     ctx: RunMutationCtx,
@@ -173,7 +174,9 @@ export class SecretStore<
   /**
    * Rewrap secrets onto the active KEK version. Call once after deploying a new
    * key — it drains in the background; safe to call again to resume a stalled
-   * run. Returns the first batch's `{ rotated, isDone }`.
+   * run. Returns the first batch's `{ rotated, skipped, isDone }`. `skipped`
+   * counts orphan rows whose `keyVersion` is no longer configured (or whose
+   * material was replaced under the same version, which is unsupported).
    */
   async rotate(ctx: RunMutationCtx): Promise<RotateResult> {
     return await ctx.runMutation(this.component.lib.rotate, {});

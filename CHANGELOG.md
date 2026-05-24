@@ -28,11 +28,20 @@
 - New: `getOrThrow`, `isRotationComplete`.
 - `rotate` (was `rotateKeys`): no args, self-rescheduling, drains in the
   background. No cursor, no progress table, no CAS — see ADR 0002.
-- `rotate` returns `{ rotated, skipped, isDone }` and skips orphan rows whose
-  `keyVersion` is no longer configured rather than aborting the whole batch.
+- `rotate` returns `{ rotated, skipped, isDone }` and skips rows it cannot
+  rewrap (retired KEK version, or material replaced under an existing version)
+  rather than aborting the whole batch; the chain stops once only such rows
+  remain.
 - `get` / `list` take `now` as an arg (ADR 0004) — caller-supplied so expiry
   verdicts are never served stale from the query cache.
 - `put` recomputes expiry on every write (ADR 0003): `ttlMs ?? default ?? none`.
+- `ttlMs` and `SECRET_STORE_DEFAULT_TTL_MS` must be positive integers — `0` is
+  rejected (it would write an instantly-expired secret).
+- `update` requires at least one of `metadata` or `ttlMs`; calling with neither
+  throws `invalid_argument`. `{ updated: false }` now unambiguously means the
+  secret does not exist (symmetric with `remove`).
+- `updated` audit events carry `metadata: { changed: ["metadata" | "ttl"] }`
+  so the trail records *what* changed, not just *that* something did.
 - Errors standardize on `ConvexError` with a typed `data.code` and an
   `isSecretStoreError` guard.
 
