@@ -19,7 +19,7 @@ describe("expiry rollback compatibility", () => {
         updatedAt: 0,
       }),
     );
-    expect(await t.run((ctx) => ctx.db.get(id))).toMatchObject({
+    expect(await t.run((ctx) => ctx.db.get("secrets", id))).toMatchObject({
       name: "from-newer-release",
       expiresAt: 10,
       expiredAt: 20,

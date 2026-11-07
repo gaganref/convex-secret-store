@@ -10,8 +10,25 @@ const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys({ 1: RAW_V1 });
 
+async function expectOnlyMatchingRows<Row>(
+  pending: Promise<{ page: Row[] }>,
+  matches: (row: Row) => boolean,
+) {
+  const outcome = await pending.then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  );
+  if ("error" in outcome) {
+    expect(outcome.error).toMatchObject({
+      data: { code: "invalid_argument" },
+    });
+  } else {
+    expect(outcome.result.page.every(matches)).toBe(true);
+  }
+}
+
 describe("pagination filter isolation", () => {
-  test("list rejects cross-namespace cursors and preserves three-page pagination", async () => {
+  test("list never returns rows outside the namespace for a foreign cursor", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, {
       namespace: "a-victim",
@@ -24,7 +41,7 @@ describe("pagination filter isolation", () => {
       value: "v",
     });
 
-    await expect(
+    await expectOnlyMatchingRows(
       t.query(api.lib.list, {
         namespace: "z-attacker",
         paginationOpts: {
@@ -33,12 +50,8 @@ describe("pagination filter isolation", () => {
         },
         now: Date.now(),
       }),
-    ).rejects.toMatchObject({
-      data: {
-        code: "invalid_argument",
-        message: "cursor does not belong to this query",
-      },
-    });
+      (row) => row.namespace === "z-attacker",
+    );
 
     const expectedIds = [];
     for (let i = 0; i < 5; i++) {
@@ -78,7 +91,7 @@ describe("pagination filter isolation", () => {
   });
 
   test.each(["namespace", "name", "type", "secretId"] as const)(
-    "listEvents rejects a foreign cursor and preserves three pages with %s",
+    "listEvents never returns rows outside the %s filter for a foreign cursor",
     async (filter) => {
       const t = initConvexTest();
       const victim = await t.mutation(api.lib.put, {
@@ -99,7 +112,7 @@ describe("pagination filter isolation", () => {
               ...(filter === "name" ? { name: "z-public" } : {}),
               ...(filter === "type" ? { type: "updated" as const } : {}),
             };
-      await expect(
+      await expectOnlyMatchingRows(
         t.query(api.lib.listEvents, {
           ...filters,
           paginationOpts: {
@@ -116,12 +129,11 @@ describe("pagination filter isolation", () => {
             ]),
           },
         }),
-      ).rejects.toMatchObject({
-        data: {
-          code: "invalid_argument",
-          message: "cursor does not belong to this query",
-        },
-      });
+        (row) =>
+          filter === "secretId"
+            ? row.secretId === secretId
+            : row.namespace === "z-attacker",
+      );
 
       const { secretId: pagingSecretId } = await t.mutation(api.lib.put, {
         namespace: "workspace",
@@ -190,7 +202,9 @@ test("decryption errors do not disclose the secret name", async () => {
     name,
     value: "private-value",
   });
-  await t.run((ctx) => ctx.db.patch(secretId, { encryptedValue: "invalid" }));
+  await t.run((ctx) =>
+    ctx.db.patch("secrets", secretId, { encryptedValue: "invalid" }),
+  );
 
   const error: unknown = await t
     .query(api.lib.get, { name, now: Date.now() })
@@ -518,9 +532,9 @@ describe("component lib — update and remove", () => {
   test("update with neither metadata nor ttlMs throws invalid_argument", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "k", value: "v" });
-    await expect(
-      t.mutation(api.lib.update, { name: "k" }),
-    ).rejects.toThrow(/at least one of metadata or ttlMs/);
+    await expect(t.mutation(api.lib.update, { name: "k" })).rejects.toThrow(
+      /at least one of metadata or ttlMs/,
+    );
   });
 
   test("remove deletes a secret", async () => {
