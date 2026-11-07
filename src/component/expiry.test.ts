@@ -1,5 +1,67 @@
 import { describe, expect, test } from "vitest";
 import { resolveExpiresAt } from "./expiry.js";
+import { internal } from "./_generated/api.js";
+import { initConvexTest } from "./setup.test.js";
+
+describe("expiry rollback compatibility", () => {
+  test("the schema accepts expiredAt left by a newer release", async () => {
+    const t = initConvexTest();
+    const id = await t.run((ctx) =>
+      ctx.db.insert("secrets", {
+        name: "from-newer-release",
+        encryptedValue: "ciphertext",
+        iv: "iv",
+        wrappedDEK: "wrapped",
+        dekIv: "dek-iv",
+        keyVersion: 1,
+        expiresAt: 10,
+        expiredAt: 20,
+        updatedAt: 0,
+      }),
+    );
+    expect(await t.run((ctx) => ctx.db.get(id))).toMatchObject({
+      name: "from-newer-release",
+      expiresAt: 10,
+      expiredAt: 20,
+    });
+  });
+
+  test("the internal expire function returns null and changes no secrets or events", async () => {
+    const t = initConvexTest();
+    const secretId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("secrets", {
+        name: "scheduled-secret",
+        encryptedValue: "ciphertext",
+        iv: "iv",
+        wrappedDEK: "wrapped",
+        dekIv: "dek-iv",
+        keyVersion: 1,
+        expiresAt: 10,
+        updatedAt: 0,
+      });
+      await ctx.db.insert("secretEvents", {
+        secretId: id,
+        name: "scheduled-secret",
+        type: "created",
+      });
+      return id;
+    });
+    const snapshot = () =>
+      t.run(async (ctx) => ({
+        secrets: await ctx.db.query("secrets").collect(),
+        events: await ctx.db.query("secretEvents").collect(),
+        scheduled: await ctx.db.system.query("_scheduled_functions").collect(),
+      }));
+    const before = await snapshot();
+    expect(
+      await t.mutation(internal.expiry.expire, { secretId, expiresAt: 10 }),
+    ).toBeNull();
+    expect(
+      await t.mutation(internal.expiry.expire, { secretId, expiresAt: 999 }),
+    ).toBeNull();
+    expect(await snapshot()).toEqual(before);
+  });
+});
 
 describe("resolveExpiresAt", () => {
   test("uses ttlMs when given a number", () => {
