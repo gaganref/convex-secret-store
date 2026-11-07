@@ -486,9 +486,9 @@ against any actor with deployment access:
   host app. Check that the caller may use a namespace before passing it to
   `get`, `list`, or `listEvents`. Results never include rows outside the
   namespace and filters you pass, whatever cursor the client sends.
-- **Errors carry no secrets.** Error messages never include key material,
-  secret values, or secret names, so passing a `ConvexError` on to clients is
-  safe.
+- **Errors carry no key material or secret values.** A `getOrThrow` error
+  names the secret you asked for, so treat secret names in errors like any
+  other data you choose to show a client.
 - **Audit events are advisory, not tamper-evident.** Events live in the same
   database as the secrets and have no append-only enforcement; treat them as a
   forensic trail visible to anyone with deployment access, not as evidence of
