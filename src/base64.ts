@@ -21,6 +21,7 @@ export function decodeBase64(input: string): Uint8Array {
       return Uint8Array.from(Buffer.from(padded, "base64"));
     }
   } catch (error) {
+    // eslint-disable-next-line preserve-caught-error -- Preserve the existing error shape for package consumers.
     throw new Error(`invalid base64 input: ${String(error)}`);
   }
 
