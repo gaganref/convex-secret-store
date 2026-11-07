@@ -42,7 +42,7 @@ function parseDefaultTtlMs(raw: string | undefined): number | null {
   if (!Number.isInteger(value) || value <= 0) {
     throw new ConvexError({
       code: "invalid_keys",
-      message: `SECRET_STORE_DEFAULT_TTL_MS must be a positive integer, got "${raw}"`,
+      message: "SECRET_STORE_DEFAULT_TTL_MS must be a positive integer",
     });
   }
   return value;

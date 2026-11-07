@@ -132,7 +132,9 @@ describe("pagination filter isolation", () => {
         (row) =>
           filter === "secretId"
             ? row.secretId === secretId
-            : row.namespace === "z-attacker",
+            : row.namespace === "z-attacker" &&
+              (filter !== "name" || row.name === "z-public") &&
+              (filter !== "type" || row.type === "updated"),
       );
 
       const { secretId: pagingSecretId } = await t.mutation(api.lib.put, {
@@ -950,5 +952,43 @@ describe("component lib — rotation", () => {
       });
     });
     expect(await t.query(api.lib.isRotationComplete, {})).toBe(false);
+  });
+});
+
+describe("rollback compatibility with 0.3.0 expiry flags", () => {
+  async function flaggedSecret() {
+    const t = initConvexTest();
+    const { secretId } = await t.mutation(api.lib.put, {
+      name: "flagged",
+      value: "v1",
+      ttlMs: 60_000,
+    });
+    await t.run((ctx) =>
+      ctx.db.patch("secrets", secretId, { expiredAt: Date.now() }),
+    );
+    const expiredAt = async () =>
+      (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiredAt;
+    return { t, expiredAt };
+  }
+
+  test("put over a flagged secret clears the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.put, { name: "flagged", value: "v2" });
+    expect(await expiredAt()).toBeUndefined();
+  });
+
+  test("update with a new ttl clears the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.update, { name: "flagged", ttlMs: 60_000 });
+    expect(await expiredAt()).toBeUndefined();
+  });
+
+  test("update of metadata alone keeps the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.update, {
+      name: "flagged",
+      metadata: { owner: "x" },
+    });
+    expect(await expiredAt()).toBeTypeOf("number");
   });
 });

@@ -15,6 +15,7 @@ import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt } from "./expiry.js";
 import { recordEvent } from "./events.js";
+import { eventMatchesFilter } from "./filters.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -137,6 +138,8 @@ export const put = mutation({
       keyVersion,
       metadata: nextMetadata,
       expiresAt,
+      // A new value is not expired, even if 0.3.0 flagged the old one.
+      expiredAt: undefined,
       updatedAt: now,
     });
     await recordEvent(ctx, {
@@ -341,6 +344,7 @@ export const update = mutation({
       updatedAt: number;
       metadata?: Record<string, unknown>;
       expiresAt?: number;
+      expiredAt?: undefined;
     } = { updatedAt: now };
     const changed: Array<"metadata" | "ttl"> = [];
     if (args.metadata !== undefined) {
@@ -349,6 +353,7 @@ export const update = mutation({
     }
     if (args.ttlMs !== undefined) {
       patch.expiresAt = nextExpiresAt;
+      patch.expiredAt = undefined;
       changed.push("ttl");
     }
     await ctx.db.patch("secrets", secret._id, patch);
@@ -482,12 +487,9 @@ export const listEvents = query({
     }
 
     if (
-      result.page.some((event) =>
-        secretId !== undefined
-          ? event.secretId !== secretId
-          : event.namespace !== namespace ||
-            (name !== undefined && event.name !== name) ||
-            (type !== undefined && event.type !== type),
+      result.page.some(
+        (event) =>
+          !eventMatchesFilter(event, { secretId, namespace, name, type }),
       )
     ) {
       throw new ConvexError({

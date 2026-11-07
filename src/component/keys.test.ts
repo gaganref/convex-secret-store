@@ -133,3 +133,23 @@ describe("component key configuration", () => {
     expect(secondKek).not.toBe(firstKek);
   });
 });
+
+test("an invalid default TTL is reported without echoing its value", async () => {
+  const { defaultTtlMs } = await import("./keys.js");
+  const raw = "not-a-number-but-maybe-a-pasted-key";
+  process.env.SECRET_STORE_KEYS = defineKeys({
+    1: Buffer.alloc(32, 1).toString("base64"),
+  });
+  process.env.SECRET_STORE_DEFAULT_TTL_MS = raw;
+  resetKeyConfig();
+  let message = "";
+  try {
+    defaultTtlMs();
+  } catch (error) {
+    message = (error as { data: { message: string } }).data.message;
+  }
+  delete process.env.SECRET_STORE_DEFAULT_TTL_MS;
+  resetKeyConfig();
+  expect(message).toContain("SECRET_STORE_DEFAULT_TTL_MS");
+  expect(message).not.toContain(raw);
+});
