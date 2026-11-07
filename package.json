@@ -1,7 +1,10 @@
 {
   "name": "convex-secret-store",
   "description": "A secret store component for Convex.",
-  "repository": "github:gaganref/convex-secret-store",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gaganref/convex-secret-store.git"
+  },
   "homepage": "https://github.com/gaganref/convex-secret-store#readme",
   "bugs": {
     "url": "https://github.com/gaganref/convex-secret-store/issues"
