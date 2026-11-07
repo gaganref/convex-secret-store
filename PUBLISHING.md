@@ -1,69 +1,40 @@
 # Publishing
 
-This package publishes to npm as `convex-secret-store`.
+`convex-secret-store` publishes to npm from GitHub Actions. Pushing a version
+tag runs `.github/workflows/release.yml`, which builds, tests, and publishes
+with npm provenance. Nobody publishes from a laptop.
 
-Before the first publish:
+## One-time setup
 
-1. Ensure the npm package name is still available and matches `package.json`.
-2. `npm login`
-3. `npm ci`
-4. `npm run build:clean`
-5. `npm run typecheck`
-6. `npm run lint`
-7. `npm test`
-8. `npm pack --dry-run`
-9. `npm publish --access public`
+1. On npmjs.com, open the package settings and add a trusted publisher: GitHub
+   Actions, repository `gaganref/convex-secret-store`, workflow `release.yml`,
+   environment `npm`.
+2. In the GitHub repository settings, create the `npm` environment. Add yourself
+   as a required reviewer if every publish should wait for a click.
 
-## Recommended release flow
+## Release a version
 
-The release scripts in `package.json` already chain the important checks:
+1. Open a release PR that sets `version` in `package.json` and
+   `package-lock.json` and adds the `CHANGELOG.md` entry. Update the README in
+   the same PR if the release changes anything it describes.
+2. Merge the PR once CI is green.
+3. Tag the merge commit on `main` and push the tag:
 
-- `preversion` runs a clean build, tests, lint, and typecheck
-- `version` updates `CHANGELOG.md`
-- `alpha` publishes a prerelease tagged `alpha`
-- `release` publishes the next patch version as `latest`
+   ```sh
+   git switch main && git pull
+   git tag v0.2.1
+   git push origin v0.2.1
+   ```
 
-## Alpha publish
+The workflow refuses a tag that is not on `main` or that does not match
+`package.json`. A tag with a prerelease suffix, such as `v0.3.0-rc.0`, publishes
+under the npm `next` dist-tag, and any other tag publishes as `latest`.
 
-```sh
-npm run alpha
-```
-
-Install the alpha with:
-
-```sh
-npm install convex-secret-store@alpha
-```
-
-## Stable publish
+## Check the release
 
 ```sh
-npm run release
+npm view convex-secret-store version dist-tags
 ```
 
-For a minor or major release:
-
-```sh
-npm version minor # or major
-npm publish
-git push --follow-tags
-```
-
-## Sanity-check the tarball
-
-```sh
-npm pack
-```
-
-Then install the generated tarball in another project:
-
-```sh
-npm install ./path/to/convex-secret-store-<version>.tgz
-```
-
-Verify:
-
-- `convex-secret-store/convex.config.js` resolves
-- `convex-secret-store` exports the `SecretStore` class
-- `convex-secret-store/_generated/component.js` exposes component types
-- the README snippets still match the published package name
+Then install the new version in a scratch Convex app and run
+`npx convex dev --once` to confirm it pushes.
