@@ -9,6 +9,175 @@ const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys({ 1: RAW_V1 });
 
+describe("pagination filter isolation", () => {
+  test("list rejects cross-namespace cursors and preserves three-page pagination", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a-victim",
+      name: "private-name",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "z-attacker",
+      name: "public-name",
+      value: "v",
+    });
+
+    await expect(
+      t.query(api.lib.list, {
+        namespace: "z-attacker",
+        paginationOpts: {
+          numItems: 10,
+          cursor: JSON.stringify(["a-victim", Number.MAX_VALUE]),
+        },
+        now: Date.now(),
+      }),
+    ).rejects.toMatchObject({
+      data: {
+        code: "invalid_argument",
+        message: "cursor does not belong to this query",
+      },
+    });
+
+    const expectedIds = [];
+    for (let i = 0; i < 5; i++) {
+      const { secretId } = await t.mutation(api.lib.put, {
+        namespace: "workspace",
+        name: `secret-${i}`,
+        value: "v",
+      });
+      expectedIds.push(secretId);
+    }
+    await t.mutation(api.lib.put, {
+      namespace: "other",
+      name: "other",
+      value: "v",
+    });
+
+    let cursor: string | null = null;
+    const ids = [];
+    for (let page = 0; page < 3; page++) {
+      const result = await t.query(api.lib.list, {
+        namespace: "workspace",
+        now: Date.now(),
+        paginationOpts: { numItems: 2, cursor },
+      });
+      expect(result.page.every((row) => row.namespace === "workspace")).toBe(
+        true,
+      );
+      ids.push(...result.page.map((row) => row.secretId));
+      expect(result.isDone).toBe(page === 2);
+      cursor = result.continueCursor;
+    }
+    expect(ids.sort()).toEqual(expectedIds.sort());
+    expect(new Set(ids).size).toBe(5);
+  });
+
+  test.each(["namespace", "name", "type", "secretId"] as const)(
+    "listEvents rejects a foreign cursor and preserves three pages with %s",
+    async (filter) => {
+      const t = initConvexTest();
+      const victim = await t.mutation(api.lib.put, {
+        namespace: "a-victim",
+        name: "public-name",
+        value: "v",
+      });
+      const { secretId } = await t.mutation(api.lib.put, {
+        namespace: "z-attacker",
+        name: "public-name",
+        value: "v",
+      });
+      const filters =
+        filter === "secretId"
+          ? { secretId }
+          : {
+              namespace: "z-attacker",
+              ...(filter === "name" ? { name: "z-public" } : {}),
+              ...(filter === "type" ? { type: "updated" as const } : {}),
+            };
+      await expect(
+        t.query(api.lib.listEvents, {
+          ...filters,
+          paginationOpts: {
+            numItems: 10,
+            cursor: JSON.stringify([
+              filter === "secretId"
+                ? victim.secretId
+                : filter === "namespace" ? "a-victim" : "z-attacker",
+              ...(filter === "name" ? ["public-name"] : []),
+              ...(filter === "type" ? ["created"] : []),
+              Number.MAX_VALUE,
+            ]),
+          },
+        }),
+      ).rejects.toMatchObject({
+        data: {
+          code: "invalid_argument",
+          message: "cursor does not belong to this query",
+        },
+      });
+
+      const { secretId: pagingSecretId } = await t.mutation(api.lib.put, {
+        namespace: "workspace",
+        name: "secret",
+        value: "v",
+      });
+      for (let i = 0; i < 4; i++) {
+        await t.mutation(api.lib.put, {
+          namespace: "workspace",
+          name: "secret",
+          value: `v${i}`,
+        });
+      }
+      await t.mutation(api.lib.put, {
+        namespace: "other",
+        name: "other",
+        value: "v",
+      });
+      const pagingFilters =
+        filter === "secretId"
+          ? { secretId: pagingSecretId }
+          : {
+              namespace: "workspace",
+              ...(filter === "name" ? { name: "secret" } : {}),
+              ...(filter === "type" ? { type: "updated" as const } : {}),
+            };
+      if (filter === "type") {
+        await t.mutation(api.lib.put, {
+          namespace: "workspace",
+          name: "secret",
+          value: "last",
+        });
+      }
+
+      let cursor: string | null = null;
+      const ids = [];
+      for (let page = 0; page < 3; page++) {
+        const result = await t.query(api.lib.listEvents, {
+          ...pagingFilters,
+          paginationOpts: { numItems: 2, cursor },
+        });
+        expect(result.page.every((row) => row.namespace === "workspace")).toBe(
+          true,
+        );
+        if (filter === "type") {
+          expect(result.page.every((row) => row.type === "updated")).toBe(true);
+        }
+        expect(
+          result.page.every((row) => row.secretId === pagingSecretId),
+        ).toBe(true);
+        ids.push(...result.page.map((row) => row.eventId));
+        expect(result.isDone).toBe(page === 2);
+        cursor = result.continueCursor;
+      }
+      expect(ids).toHaveLength(5);
+      expect(new Set(ids).size).toBe(5);
+    },
+  );
+
+
+});
+
 test("decryption errors do not disclose the secret name", async () => {
   const t = initConvexTest();
   const name = "private-provider-account";
