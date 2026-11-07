@@ -268,6 +268,13 @@ export const list = query({
       .order(args.order ?? "desc")
       .paginate(args.paginationOpts);
 
+    if (result.page.some((secret) => secret.namespace !== args.namespace)) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "cursor does not belong to this query",
+      });
+    }
+
     return {
       page: result.page.map((secret) => ({
         secretId: secret._id,
@@ -472,6 +479,21 @@ export const listEvents = query({
         .withIndex("by_namespace", (q) => q.eq("namespace", namespace))
         .order(order)
         .paginate(args.paginationOpts);
+    }
+
+    if (
+      result.page.some((event) =>
+        secretId !== undefined
+          ? event.secretId !== secretId
+          : event.namespace !== namespace ||
+            (name !== undefined && event.name !== name) ||
+            (type !== undefined && event.type !== type),
+      )
+    ) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "cursor does not belong to this query",
+      });
     }
 
     return {
