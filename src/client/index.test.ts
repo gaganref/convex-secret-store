@@ -31,6 +31,36 @@ function ctxFrom(t: ReturnType<typeof initConvexTest>) {
 }
 
 describe("SecretStore facade", () => {
+  test("isSecretStoreError requires a string message", () => {
+    for (const message of [null, undefined, 1, false, {}, []]) {
+      expect(
+        isSecretStoreError(new ConvexError({ code: "not_found", message })),
+      ).toBe(false);
+    }
+    for (const code of [
+      "invalid_argument",
+      "invalid_keys",
+      "key_unavailable",
+      "decryption_failed",
+      "value_too_large",
+      "not_found",
+      "expired",
+    ]) {
+      expect(
+        isSecretStoreError(new ConvexError({ code, message: "unavailable" })),
+      ).toBe(true);
+    }
+    expect(
+      isSecretStoreError(new ConvexError({ code: "not_found", message: "" })),
+    ).toBe(true);
+    expect(
+      isSecretStoreError(
+        new ConvexError({ code: "other", message: "unavailable" }),
+      ),
+    ).toBe(false);
+    expect(isSecretStoreError(new Error("unavailable"))).toBe(false);
+  });
+
   test.each(["put", "update"] as const)(
     "%s rejects Date metadata before the component call without disclosing plaintext",
     async (operation) => {
