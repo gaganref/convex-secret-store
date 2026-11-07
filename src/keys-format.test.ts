@@ -9,6 +9,46 @@ const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 
 describe("keys-format", () => {
+  test.each([
+    ["missing prefix", RAW_V1],
+    ["missing prefix with whitespace", ` \t${RAW_V1}\n `],
+    ["reversed entry", `${RAW_V1}:1`],
+    ["reversed entry with whitespace", ` ${RAW_V1} : 1 `],
+    ["second entry", `2:${RAW_V2}, ${RAW_V1}`],
+  ])("parseKeyEntries redacts key material in %s", (_label, raw) => {
+    let error: unknown;
+    try {
+      parseKeyEntries(raw);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toMatch(/SECRET_STORE_KEYS entry \d+/);
+    const leaksKey = Array.from({ length: RAW_V1.length - 7 }, (_, i) =>
+      message.includes(RAW_V1.slice(i, i + 8)),
+    ).some(Boolean);
+    expect(leaksKey).toBe(false);
+  });
+
+  test.each([RAW_V1, ` ${RAW_V1} `])(
+    "defineKeys redacts key material used as a version, case %#",
+    (version) => {
+      let error: unknown;
+      try {
+        defineKeys({ [version]: "1" });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      const leaksKey = Array.from({ length: RAW_V1.length - 7 }, (_, i) =>
+        message.includes(RAW_V1.slice(i, i + 8)),
+      ).some(Boolean);
+      expect(leaksKey).toBe(false);
+    },
+  );
+
   test("defineKeys serializes a single key to the delimited format", () => {
     expect(defineKeys({ 1: RAW_V1 })).toBe(`1:${RAW_V1}`);
   });
