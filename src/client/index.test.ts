@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { ConvexError } from "convex/values";
 import { SecretStore, isSecretStoreError } from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -30,6 +31,86 @@ function ctxFrom(t: ReturnType<typeof initConvexTest>) {
 }
 
 describe("SecretStore facade", () => {
+  test.each(["put", "update"] as const)(
+    "%s rejects Date metadata before the component call without disclosing plaintext",
+    async (operation) => {
+      const t = initConvexTest();
+      const { mutationCtx, queryCtx } = ctxFrom(t);
+      const secrets = new SecretStore(components.secretStore);
+      const plaintext = "sensitive-value-never-log";
+      await secrets.put(mutationCtx, {
+        name: "api-key",
+        value: plaintext,
+        metadata: { owner: "platform" },
+      });
+      const typedSecrets = new SecretStore<string, { expires: Date }>(
+        components.secretStore,
+      );
+      let componentCalls = 0;
+      const observedCtx: RunMutationCtx = {
+        runMutation: (ref, args) => {
+          componentCalls++;
+          return mutationCtx.runMutation(ref, args);
+        },
+      };
+      const args = { name: "api-key", metadata: { expires: new Date(0) } };
+      const error: unknown = await (
+        operation === "put"
+          ? typedSecrets.put(observedCtx, { ...args, value: plaintext })
+          : typedSecrets.update(observedCtx, args)
+      ).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ConvexError);
+      expect(isSecretStoreError(error)).toBe(true);
+      expect((error as ConvexError).data).toEqual({
+        code: "invalid_argument",
+        message: "metadata must contain only Convex values",
+      });
+      expect(String(error).includes(plaintext)).toBe(false);
+      expect(
+        JSON.stringify((error as ConvexError).data).includes(plaintext),
+      ).toBe(false);
+      expect(componentCalls).toBe(0);
+      expect(await secrets.get(queryCtx, { name: "api-key" })).toMatchObject({
+        ok: true,
+        value: plaintext,
+        metadata: { owner: "platform" },
+      });
+
+      const write = (metadata?: Record<string, unknown> | null) =>
+        operation === "put"
+          ? secrets.put(mutationCtx, {
+              name: "api-key",
+              value: plaintext,
+              metadata,
+              ttlMs: null,
+            })
+          : secrets.update(mutationCtx, {
+              name: "api-key",
+              metadata,
+              ttlMs: null,
+            });
+      await write();
+      expect(await secrets.get(queryCtx, { name: "api-key" })).toMatchObject({
+        ok: true,
+        metadata: { owner: "platform" },
+      });
+      await write(null);
+      const cleared = await secrets.getOrThrow(queryCtx, { name: "api-key" });
+      expect(cleared.metadata).toBeUndefined();
+      await write({ owner: undefined });
+      expect(await secrets.get(queryCtx, { name: "api-key" })).toMatchObject({
+        ok: true,
+        metadata: {},
+      });
+      await write({ owner: "ops", nested: { enabled: true } });
+      expect(await secrets.get(queryCtx, { name: "api-key" })).toMatchObject({
+        ok: true,
+        value: plaintext,
+        metadata: { owner: "ops", nested: { enabled: true } },
+      });
+    },
+  );
+
   test("put and get round-trip through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
