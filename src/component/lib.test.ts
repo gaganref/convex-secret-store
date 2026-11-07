@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ConvexError } from "convex/values";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -57,11 +58,14 @@ describe("pagination filter isolation", () => {
     let cursor: string | null = null;
     const ids = [];
     for (let page = 0; page < 3; page++) {
-      const result = await t.query(api.lib.list, {
-        namespace: "workspace",
-        now: Date.now(),
-        paginationOpts: { numItems: 2, cursor },
-      });
+      const result: FunctionReturnType<typeof api.lib.list> = await t.query(
+        api.lib.list,
+        {
+          namespace: "workspace",
+          now: Date.now(),
+          paginationOpts: { numItems: 2, cursor },
+        },
+      );
       expect(result.page.every((row) => row.namespace === "workspace")).toBe(
         true,
       );
@@ -103,7 +107,9 @@ describe("pagination filter isolation", () => {
             cursor: JSON.stringify([
               filter === "secretId"
                 ? victim.secretId
-                : filter === "namespace" ? "a-victim" : "z-attacker",
+                : filter === "namespace"
+                  ? "a-victim"
+                  : "z-attacker",
               ...(filter === "name" ? ["public-name"] : []),
               ...(filter === "type" ? ["created"] : []),
               Number.MAX_VALUE,
@@ -153,10 +159,11 @@ describe("pagination filter isolation", () => {
       let cursor: string | null = null;
       const ids = [];
       for (let page = 0; page < 3; page++) {
-        const result = await t.query(api.lib.listEvents, {
-          ...pagingFilters,
-          paginationOpts: { numItems: 2, cursor },
-        });
+        const result: FunctionReturnType<typeof api.lib.listEvents> =
+          await t.query(api.lib.listEvents, {
+            ...pagingFilters,
+            paginationOpts: { numItems: 2, cursor },
+          });
         expect(result.page.every((row) => row.namespace === "workspace")).toBe(
           true,
         );
@@ -174,8 +181,6 @@ describe("pagination filter isolation", () => {
       expect(new Set(ids).size).toBe(5);
     },
   );
-
-
 });
 
 test("decryption errors do not disclose the secret name", async () => {

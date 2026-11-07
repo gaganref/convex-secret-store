@@ -91,14 +91,14 @@ describe("SecretStore facade", () => {
       ).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(ConvexError);
       expect(isSecretStoreError(error)).toBe(true);
-      expect((error as ConvexError).data).toEqual({
+      const data = (error as ConvexError<{ code: string; message: string }>)
+        .data;
+      expect(data).toEqual({
         code: "invalid_argument",
         message: "metadata must contain only Convex values",
       });
       expect(String(error).includes(plaintext)).toBe(false);
-      expect(
-        JSON.stringify((error as ConvexError).data).includes(plaintext),
-      ).toBe(false);
+      expect(JSON.stringify(data).includes(plaintext)).toBe(false);
       expect(componentCalls).toBe(0);
       expect(await secrets.get(queryCtx, { name: "api-key" })).toMatchObject({
         ok: true,
