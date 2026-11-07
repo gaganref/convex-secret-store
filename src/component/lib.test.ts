@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { ConvexError } from "convex/values";
 import { api } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -7,6 +8,24 @@ import { resetKeyConfig } from "./keys.js";
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys({ 1: RAW_V1 });
+
+test("decryption errors do not disclose the secret name", async () => {
+  const t = initConvexTest();
+  const name = "private-provider-account";
+  const { secretId } = await t.mutation(api.lib.put, {
+    name,
+    value: "private-value",
+  });
+  await t.run((ctx) => ctx.db.patch(secretId, { encryptedValue: "invalid" }));
+
+  const error: unknown = await t
+    .query(api.lib.get, { name, now: Date.now() })
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(ConvexError);
+  const data = (error as ConvexError<{ code: string; message: string }>).data;
+  expect(data.code).toBe("decryption_failed");
+  expect(data.message.includes(name)).toBe(false);
+});
 
 beforeEach(() => {
   resetKeyConfig();
