@@ -213,7 +213,7 @@ export const get = query({
     } catch {
       throw new ConvexError({
         code: "decryption_failed",
-        message: `failed to decrypt secret "${args.name}"`,
+        message: "failed to decrypt secret",
       });
     }
 
