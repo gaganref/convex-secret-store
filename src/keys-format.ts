@@ -118,13 +118,13 @@ export function validateKeyEntries(keys: readonly KeyEntry[]): void {
  * `convex env set SECRET_STORE_KEYS "1:AQEB…,2:AgIC…"`.
  */
 export function defineKeys(keys: Record<number, string>): string {
-  const entries: KeyEntry[] = Object.entries(keys).map(([k, value]) => {
+  const entries: KeyEntry[] = Object.entries(keys).map(([k, value], index) => {
     const version = Number(k);
     if (!Number.isInteger(version) || version < 0) {
-      fail(`"${k}" is not a non-negative integer version`);
+      fail(`keys[${index}].version must be a non-negative integer`);
     }
     if (typeof value !== "string") {
-      fail(`version ${k} value must be a string`);
+      fail(`keys[${index}].value must be a string`);
     }
     return { version, value: value.trim() };
   });
@@ -148,7 +148,7 @@ export function parseKeyEntries(raw: string): KeyEntry[] {
     const colon = trimmed.indexOf(":");
     if (colon < 0) {
       fail(
-        `SECRET_STORE_KEYS entry ${index} must be "version:value", got "${trimmed}"`,
+        `SECRET_STORE_KEYS entry ${index} must be "version:value"`,
       );
     }
     const versionStr = trimmed.slice(0, colon).trim();
@@ -156,7 +156,7 @@ export function parseKeyEntries(raw: string): KeyEntry[] {
     const version = Number(versionStr);
     if (versionStr === "" || !Number.isInteger(version) || version < 0) {
       fail(
-        `SECRET_STORE_KEYS entry ${index} version "${versionStr}" is not a non-negative integer`,
+        `SECRET_STORE_KEYS entry ${index} version is not a non-negative integer`,
       );
     }
     return { version, value };
