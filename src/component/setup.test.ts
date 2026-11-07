@@ -5,7 +5,7 @@ import { convexTest } from "convex-test";
 export const modules = import.meta.glob("./**/*.*s");
 
 export function initConvexTest() {
-  const t = convexTest(schema, modules);
+  const t = convexTest({ schema, modules, transactionLimits: true });
   return t;
 }
 test("setup", () => {});

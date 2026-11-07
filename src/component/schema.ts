@@ -34,6 +34,7 @@ export default defineSchema({
 
   secretEvents: defineTable(secretEventsFields)
     .index("by_secret_id", ["secretId"])
+    // eslint-disable-next-line @convex-dev/no-duplicate-indexes -- Namespace event listings sort by creation time, not name.
     .index("by_namespace", ["namespace"])
     .index("by_namespace_and_name", ["namespace", "name"])
     .index("by_namespace_and_type", ["namespace", "type"]),

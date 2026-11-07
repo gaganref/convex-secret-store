@@ -14,10 +14,6 @@
       "groupName": "Major updates",
       "matchUpdateTypes": ["major"],
       "automerge": false
-    },
-    {
-      "matchDepTypes": ["devDependencies"],
-      "automerge": true
     }
   ]
 }

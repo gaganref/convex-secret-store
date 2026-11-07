@@ -10,12 +10,14 @@ describe("example app", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetKeyConfig();
+    // eslint-disable-next-line @convex-dev/no-process-env -- Configure the component's test environment.
     process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
   });
 
   afterEach(() => {
     vi.useRealTimers();
     resetKeyConfig();
+    // eslint-disable-next-line @convex-dev/no-process-env -- Restore the component's test environment.
     delete process.env.SECRET_STORE_KEYS;
   });
 
