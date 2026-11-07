@@ -13,3 +13,8 @@ node_modules
 # npm pack output
 *.tgz
 *.tsbuildinfo
+
+# Convex agent skills, installed on demand with `npx convex ai-files install`
+.agents/skills/convex*
+.claude/skills/convex*
+skills-lock.json
