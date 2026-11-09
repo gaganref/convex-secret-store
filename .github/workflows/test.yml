@@ -11,28 +11,42 @@ on:
 
 jobs:
   check:
-    name: Test and lint
+    name: Test and lint (Convex ${{ matrix.convex }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        convex: [installed, "1.39.1"]
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Node setup
-        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          cache-dependency-path: package.json
-          node-version: "24.x"
+          cache-dependency-path: package-lock.json
+          node-version: "26.x"
           cache: "npm"
 
-      - name: Install and build
-        run: |
-          npm i
-          npm run build
+      - name: Install
+        run: npm ci
+      - name: Install minimum supported Convex
+        if: matrix.convex == '1.39.1'
+        # convex-test 0.0.67 needs convex >= 1.43, so the floor leg pairs 1.39.1 with the last compatible convex-test.
+        run: npm i --no-save convex@1.39.1 convex-test@0.0.53
+      - name: Build
+        run: npm run build
       - name: Publish package for testing branch
-        run: npx pkg-pr-new publish || echo "Have you set up pkg-pr-new for this repo?"
+        if: matrix.convex == 'installed'
+        run: |
+          npx pkg-pr-new publish || echo "Have you set up pkg-pr-new for this repo?"
       - name: Test
+        if: matrix.convex == 'installed'
         run: |
           npm run test
           npm run typecheck
           npm run lint
+      - name: Test on minimum supported Convex
+        if: matrix.convex == '1.39.1'
+        run: npx vitest run
