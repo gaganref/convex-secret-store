@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Check the tag is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "26.x"
+          registry-url: https://registry.npmjs.org
+      - name: Install
+        run: npm ci
+      - name: Build and test
+        run: |
+          npm run build
+          npm test
+          npm run typecheck
+          npm run lint
+      - name: Check tag version
+        run: |
+          test "$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME#v}"
+      - name: Publish
+        run: |
+          dist_tag=latest
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            dist_tag=next
+          fi
+          npm publish --provenance --tag "$dist_tag"
