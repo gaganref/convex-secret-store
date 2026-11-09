@@ -82,7 +82,7 @@ export default app;
 Generate a KEK and set it on the deployment:
 
 ```sh
-openssl rand -base64 32   # 32 bytes, canonical base64
+openssl rand -base64 32   # 32 random bytes as base64
 npx convex env set MY_APP_KEK_V1 "<paste the value>"
 ```
 
@@ -129,9 +129,9 @@ delimited string of versioned KEKs:
 1:<base64>,2:<base64>
 ```
 
-Each entry is `version:value`. Each KEK value must be a canonical 32-byte
-standard base64 string (44 chars ending in `=`) — the output of
-`openssl rand -base64 32`.
+Each entry is `version:value`. Each KEK value is 32 bytes in standard base64:
+44 characters ending in one `=`, which is what `openssl rand -base64 32`
+prints.
 
 You can build the value with `defineKeys` (typed, eagerly validated):
 
@@ -482,6 +482,13 @@ against any actor with deployment access:
   relocated between rows.
 - **Plaintext metadata.** `metadata`, `namespace`, `name`, expiry, and audit
   events are not encrypted. Do not store sensitive data in metadata.
+- **Your functions authorize, the component scopes.** The component trusts its
+  host app. Check that the caller may use a namespace before passing it to
+  `get`, `list`, or `listEvents`. Results never include rows outside the
+  namespace and filters you pass, whatever cursor the client sends.
+- **Errors carry no key material or secret values.** A `getOrThrow` error
+  names the secret you asked for, so treat secret names in errors like any
+  other data you choose to show a client.
 - **Audit events are advisory, not tamper-evident.** Events live in the same
   database as the secrets and have no append-only enforcement; treat them as a
   forensic trail visible to anyone with deployment access, not as evidence of
