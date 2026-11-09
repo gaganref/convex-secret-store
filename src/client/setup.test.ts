@@ -15,7 +15,11 @@ import { register } from "../test.js";
 export function initConvexTest<
   Schema extends SchemaDefinition<GenericSchema, boolean>,
 >(schema?: Schema) {
-  const t = convexTest(schema ?? defineSchema({}), modules);
+  const t = convexTest({
+    schema: schema ?? defineSchema({}),
+    modules,
+    transactionLimits: true,
+  });
   register(t);
   return t;
 }

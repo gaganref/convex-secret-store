@@ -8,7 +8,7 @@ const modules = import.meta.glob("./**/*.*s");
 // When users want to write tests that use your component, they need to
 // explicitly register it with its schema and modules.
 export function initConvexTest() {
-  const t = convexTest(schema, modules);
+  const t = convexTest({ schema, modules, transactionLimits: true });
   component.register(t);
   return t;
 }

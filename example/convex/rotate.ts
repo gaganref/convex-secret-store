@@ -8,6 +8,7 @@ import { secrets } from "./lib/secretStore.js";
  * Wire it to a temporary cron, or invoke it manually from the dashboard.
  */
 export const rotateSecretStore = internalMutation({
+  args: {},
   handler: async (ctx) => {
     return await secrets.rotate(ctx);
   },

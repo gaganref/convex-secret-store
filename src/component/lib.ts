@@ -132,7 +132,7 @@ export const put = mutation({
         : args.metadata === null
           ? undefined
           : args.metadata;
-    await ctx.db.patch(existing._id, {
+    await ctx.db.patch("secrets", existing._id, {
       ...payload,
       keyVersion,
       metadata: nextMetadata,
@@ -344,7 +344,7 @@ export const update = mutation({
       patch.expiresAt = nextExpiresAt;
       changed.push("ttl");
     }
-    await ctx.db.patch(secret._id, patch);
+    await ctx.db.patch("secrets", secret._id, patch);
     await recordEvent(ctx, {
       secretId: secret._id,
       namespace: secret.namespace,
@@ -385,7 +385,7 @@ export const remove = mutation({
       type: "deleted",
       metadata: { reason: "removed" },
     });
-    await ctx.db.delete(secret._id);
+    await ctx.db.delete("secrets", secret._id);
     return { removed: true };
   },
 });
@@ -560,7 +560,7 @@ export const rotate = mutation({
         skipped++;
         continue;
       }
-      await ctx.db.patch(secret._id, {
+      await ctx.db.patch("secrets", secret._id, {
         wrappedDEK: rewrapped.wrappedDEK,
         dekIv: rewrapped.dekIv,
         keyVersion: active,

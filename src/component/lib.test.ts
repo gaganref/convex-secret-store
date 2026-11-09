@@ -189,12 +189,12 @@ describe("component lib — put, get, has", () => {
     // check will fail on decrypt and `get` should surface that as a thrown
     // `decryption_failed`, not as a clean `{ ok: false }`.
     await t.run(async (ctx) => {
-      const row = await ctx.db.get(created.secretId);
+      const row = await ctx.db.get("secrets", created.secretId);
       if (row === null) throw new Error("row vanished");
       // Flip the first base64 character of the wrapped DEK.
       const flipped =
         (row.wrappedDEK[0] === "A" ? "B" : "A") + row.wrappedDEK.slice(1);
-      await ctx.db.patch(created.secretId, { wrappedDEK: flipped });
+      await ctx.db.patch("secrets", created.secretId, { wrappedDEK: flipped });
     });
 
     await expect(
@@ -697,7 +697,7 @@ describe("component lib — rotation", () => {
     expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
 
     // Row left untouched — still on its retired keyVersion.
-    const row = await t.run((ctx) => ctx.db.get(created.secretId));
+    const row = await t.run((ctx) => ctx.db.get("secrets", created.secretId));
     expect(row?.keyVersion).toBe(1);
   });
 
@@ -718,7 +718,7 @@ describe("component lib — rotation", () => {
     const result = await t.mutation(api.lib.rotate, {});
     expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
 
-    const row = await t.run((ctx) => ctx.db.get(created.secretId));
+    const row = await t.run((ctx) => ctx.db.get("secrets", created.secretId));
     expect(row?.keyVersion).toBe(1);
   });
 

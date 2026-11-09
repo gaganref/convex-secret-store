@@ -49,7 +49,7 @@ export const cleanupSecrets = mutation({
         type: "deleted",
         metadata: { reason: "expired_cleanup" },
       });
-      await ctx.db.delete(secret._id);
+      await ctx.db.delete("secrets", secret._id);
     }
 
     const isDone = expired.length < CLEANUP_BATCH_SIZE;
@@ -81,7 +81,7 @@ export const cleanupEvents = mutation({
       .take(CLEANUP_BATCH_SIZE);
 
     for (const event of stale) {
-      await ctx.db.delete(event._id);
+      await ctx.db.delete("secretEvents", event._id);
     }
 
     const isDone = stale.length < CLEANUP_BATCH_SIZE;
