@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { defineKeys } from "../keys-format.js";
+import { ConvexError } from "convex/values";
+import { api } from "./_generated/api.js";
+import { initConvexTest } from "./setup.test.js";
 import {
   activeVersion,
   defaultTtlMs,
@@ -21,6 +24,30 @@ beforeEach(clearEnv);
 afterEach(clearEnv);
 
 describe("component key configuration", () => {
+  test.each([
+    ["missing prefix", RAW_V1],
+    ["missing prefix with whitespace", ` \t${RAW_V1}\n `],
+    ["reversed entry", `${RAW_V1}:1`],
+    ["reversed entry with whitespace", ` ${RAW_V1} : 1 `],
+  ])("component errors redact key material in %s", async (_label, raw) => {
+    const t = initConvexTest();
+    process.env.SECRET_STORE_KEYS = defineKeys({ 1: RAW_V1 });
+    await t.mutation(api.lib.put, { name: "existing", value: "private-value" });
+    process.env.SECRET_STORE_KEYS = raw;
+
+    const error: unknown = await t
+      .query(api.lib.get, { name: "existing", now: Date.now() })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ConvexError);
+    const data = (error as ConvexError<{ code: string; message: string }>).data;
+    expect(data.code).toBe("invalid_keys");
+    expect(data.message).toContain("SECRET_STORE_KEYS entry 0");
+    const leaksKey = Array.from({ length: RAW_V1.length - 7 }, (_, i) =>
+      data.message.includes(RAW_V1.slice(i, i + 8)),
+    ).some(Boolean);
+    expect(leaksKey).toBe(false);
+  });
+
   test("active version is the highest configured version", () => {
     process.env.SECRET_STORE_KEYS = defineKeys({
       1: RAW_V1,
@@ -105,4 +132,24 @@ describe("component key configuration", () => {
     const secondKek = await getKEK(1);
     expect(secondKek).not.toBe(firstKek);
   });
+});
+
+test("an invalid default TTL is reported without echoing its value", async () => {
+  const { defaultTtlMs } = await import("./keys.js");
+  const raw = "not-a-number-but-maybe-a-pasted-key";
+  process.env.SECRET_STORE_KEYS = defineKeys({
+    1: Buffer.alloc(32, 1).toString("base64"),
+  });
+  process.env.SECRET_STORE_DEFAULT_TTL_MS = raw;
+  resetKeyConfig();
+  let message = "";
+  try {
+    defaultTtlMs();
+  } catch (error) {
+    message = (error as { data: { message: string } }).data.message;
+  }
+  delete process.env.SECRET_STORE_DEFAULT_TTL_MS;
+  resetKeyConfig();
+  expect(message).toContain("SECRET_STORE_DEFAULT_TTL_MS");
+  expect(message).not.toContain(raw);
 });

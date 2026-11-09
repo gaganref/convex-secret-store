@@ -1,4 +1,11 @@
-import { ConvexError } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { internalMutation } from "./_generated/server.js";
+
+export const expire = internalMutation({
+  args: { secretId: v.id("secrets"), expiresAt: v.number() },
+  returns: v.null(),
+  handler: async () => null,
+});
 
 /**
  * Resolve a secret's absolute expiry timestamp for a write.

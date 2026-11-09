@@ -15,6 +15,7 @@ import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt } from "./expiry.js";
 import { recordEvent } from "./events.js";
+import { eventMatchesFilter } from "./filters.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -137,6 +138,8 @@ export const put = mutation({
       keyVersion,
       metadata: nextMetadata,
       expiresAt,
+      // A new value is not expired, even if 0.3.0 flagged the old one.
+      expiredAt: undefined,
       updatedAt: now,
     });
     await recordEvent(ctx, {
@@ -213,7 +216,7 @@ export const get = query({
     } catch {
       throw new ConvexError({
         code: "decryption_failed",
-        message: `failed to decrypt secret "${args.name}"`,
+        message: "failed to decrypt secret",
       });
     }
 
@@ -267,6 +270,13 @@ export const list = query({
       )
       .order(args.order ?? "desc")
       .paginate(args.paginationOpts);
+
+    if (result.page.some((secret) => secret.namespace !== args.namespace)) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "cursor does not belong to this query",
+      });
+    }
 
     return {
       page: result.page.map((secret) => ({
@@ -334,6 +344,7 @@ export const update = mutation({
       updatedAt: number;
       metadata?: Record<string, unknown>;
       expiresAt?: number;
+      expiredAt?: undefined;
     } = { updatedAt: now };
     const changed: Array<"metadata" | "ttl"> = [];
     if (args.metadata !== undefined) {
@@ -342,6 +353,7 @@ export const update = mutation({
     }
     if (args.ttlMs !== undefined) {
       patch.expiresAt = nextExpiresAt;
+      patch.expiredAt = undefined;
       changed.push("ttl");
     }
     await ctx.db.patch("secrets", secret._id, patch);
@@ -472,6 +484,18 @@ export const listEvents = query({
         .withIndex("by_namespace", (q) => q.eq("namespace", namespace))
         .order(order)
         .paginate(args.paginationOpts);
+    }
+
+    if (
+      result.page.some(
+        (event) =>
+          !eventMatchesFilter(event, { secretId, namespace, name, type }),
+      )
+    ) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "cursor does not belong to this query",
+      });
     }
 
     return {

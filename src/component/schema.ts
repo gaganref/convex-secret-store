@@ -12,6 +12,8 @@ export const secretsFields = {
   keyVersion: v.number(),
   metadata: v.optional(metadataValidator),
   expiresAt: v.optional(v.number()),
+  // Reserved for 0.3.0 rollback compatibility.
+  expiredAt: v.optional(v.number()),
   updatedAt: v.number(),
 };
 

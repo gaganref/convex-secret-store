@@ -40,11 +40,15 @@ export function isSecretStoreError(
   if (!(error instanceof ConvexError)) {
     return false;
   }
-  const data = error.data as { code?: unknown } | null | undefined;
+  const data = error.data as
+    | { code?: unknown; message?: unknown }
+    | null
+    | undefined;
   return (
     typeof data === "object" &&
     data !== null &&
     typeof data.code === "string" &&
+    typeof data.message === "string" &&
     CODES.has(data.code)
   );
 }

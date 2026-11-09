@@ -1,4 +1,4 @@
-import { ConvexError } from "convex/values";
+import { ConvexError, convexToJson, type Value } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type {
   CleanupArgs,
@@ -44,6 +44,20 @@ const DEFAULT_SECRET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Default retention before an audit event is hard-deleted (180 days). */
 const DEFAULT_EVENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 
+function validateMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): void {
+  if (metadata == null) return;
+  try {
+    convexToJson(metadata as Value);
+  } catch {
+    throw new ConvexError({
+      code: "invalid_argument",
+      message: "metadata must contain only Convex values",
+    });
+  }
+}
+
 export class SecretStore<
   Namespace extends string = string,
   Metadata extends Record<string, unknown> = Record<string, unknown>,
@@ -61,6 +75,7 @@ export class SecretStore<
     ctx: RunMutationCtx,
     args: PutArgs<Namespace, Metadata>,
   ): Promise<PutResult> {
+    validateMetadata(args.metadata);
     return await ctx.runMutation(this.component.lib.put, {
       namespace: args.namespace,
       name: args.name,
@@ -134,6 +149,7 @@ export class SecretStore<
     ctx: RunMutationCtx,
     args: UpdateArgs<Namespace, Metadata>,
   ): Promise<UpdateResult> {
+    validateMetadata(args.metadata);
     return await ctx.runMutation(this.component.lib.update, {
       namespace: args.namespace,
       name: args.name,

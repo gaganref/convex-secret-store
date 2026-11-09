@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { ConvexError } from "convex/values";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -7,6 +9,213 @@ import { resetKeyConfig } from "./keys.js";
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys({ 1: RAW_V1 });
+
+async function expectOnlyMatchingRows<Row>(
+  pending: Promise<{ page: Row[] }>,
+  matches: (row: Row) => boolean,
+) {
+  const outcome = await pending.then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  );
+  if ("error" in outcome) {
+    expect(outcome.error).toMatchObject({
+      data: { code: "invalid_argument" },
+    });
+  } else {
+    expect(outcome.result.page.every(matches)).toBe(true);
+  }
+}
+
+describe("pagination filter isolation", () => {
+  test("list never returns rows outside the namespace for a foreign cursor", async () => {
+    const t = initConvexTest();
+    await t.mutation(api.lib.put, {
+      namespace: "a-victim",
+      name: "private-name",
+      value: "v",
+    });
+    await t.mutation(api.lib.put, {
+      namespace: "z-attacker",
+      name: "public-name",
+      value: "v",
+    });
+
+    await expectOnlyMatchingRows(
+      t.query(api.lib.list, {
+        namespace: "z-attacker",
+        paginationOpts: {
+          numItems: 10,
+          cursor: JSON.stringify(["a-victim", Number.MAX_VALUE]),
+        },
+        now: Date.now(),
+      }),
+      (row) => row.namespace === "z-attacker",
+    );
+
+    const expectedIds = [];
+    for (let i = 0; i < 5; i++) {
+      const { secretId } = await t.mutation(api.lib.put, {
+        namespace: "workspace",
+        name: `secret-${i}`,
+        value: "v",
+      });
+      expectedIds.push(secretId);
+    }
+    await t.mutation(api.lib.put, {
+      namespace: "other",
+      name: "other",
+      value: "v",
+    });
+
+    let cursor: string | null = null;
+    const ids = [];
+    for (let page = 0; page < 3; page++) {
+      const result: FunctionReturnType<typeof api.lib.list> = await t.query(
+        api.lib.list,
+        {
+          namespace: "workspace",
+          now: Date.now(),
+          paginationOpts: { numItems: 2, cursor },
+        },
+      );
+      expect(result.page.every((row) => row.namespace === "workspace")).toBe(
+        true,
+      );
+      ids.push(...result.page.map((row) => row.secretId));
+      expect(result.isDone).toBe(page === 2);
+      cursor = result.continueCursor;
+    }
+    expect(ids.sort()).toEqual(expectedIds.sort());
+    expect(new Set(ids).size).toBe(5);
+  });
+
+  test.each(["namespace", "name", "type", "secretId"] as const)(
+    "listEvents never returns rows outside the %s filter for a foreign cursor",
+    async (filter) => {
+      const t = initConvexTest();
+      const victim = await t.mutation(api.lib.put, {
+        namespace: "a-victim",
+        name: "public-name",
+        value: "v",
+      });
+      const { secretId } = await t.mutation(api.lib.put, {
+        namespace: "z-attacker",
+        name: "public-name",
+        value: "v",
+      });
+      const filters =
+        filter === "secretId"
+          ? { secretId }
+          : {
+              namespace: "z-attacker",
+              ...(filter === "name" ? { name: "z-public" } : {}),
+              ...(filter === "type" ? { type: "updated" as const } : {}),
+            };
+      await expectOnlyMatchingRows(
+        t.query(api.lib.listEvents, {
+          ...filters,
+          paginationOpts: {
+            numItems: 10,
+            cursor: JSON.stringify([
+              filter === "secretId"
+                ? victim.secretId
+                : filter === "namespace"
+                  ? "a-victim"
+                  : "z-attacker",
+              ...(filter === "name" ? ["public-name"] : []),
+              ...(filter === "type" ? ["created"] : []),
+              Number.MAX_VALUE,
+            ]),
+          },
+        }),
+        (row) =>
+          filter === "secretId"
+            ? row.secretId === secretId
+            : row.namespace === "z-attacker" &&
+              (filter !== "name" || row.name === "z-public") &&
+              (filter !== "type" || row.type === "updated"),
+      );
+
+      const { secretId: pagingSecretId } = await t.mutation(api.lib.put, {
+        namespace: "workspace",
+        name: "secret",
+        value: "v",
+      });
+      for (let i = 0; i < 4; i++) {
+        await t.mutation(api.lib.put, {
+          namespace: "workspace",
+          name: "secret",
+          value: `v${i}`,
+        });
+      }
+      await t.mutation(api.lib.put, {
+        namespace: "other",
+        name: "other",
+        value: "v",
+      });
+      const pagingFilters =
+        filter === "secretId"
+          ? { secretId: pagingSecretId }
+          : {
+              namespace: "workspace",
+              ...(filter === "name" ? { name: "secret" } : {}),
+              ...(filter === "type" ? { type: "updated" as const } : {}),
+            };
+      if (filter === "type") {
+        await t.mutation(api.lib.put, {
+          namespace: "workspace",
+          name: "secret",
+          value: "last",
+        });
+      }
+
+      let cursor: string | null = null;
+      const ids = [];
+      for (let page = 0; page < 3; page++) {
+        const result: FunctionReturnType<typeof api.lib.listEvents> =
+          await t.query(api.lib.listEvents, {
+            ...pagingFilters,
+            paginationOpts: { numItems: 2, cursor },
+          });
+        expect(result.page.every((row) => row.namespace === "workspace")).toBe(
+          true,
+        );
+        if (filter === "type") {
+          expect(result.page.every((row) => row.type === "updated")).toBe(true);
+        }
+        expect(
+          result.page.every((row) => row.secretId === pagingSecretId),
+        ).toBe(true);
+        ids.push(...result.page.map((row) => row.eventId));
+        expect(result.isDone).toBe(page === 2);
+        cursor = result.continueCursor;
+      }
+      expect(ids).toHaveLength(5);
+      expect(new Set(ids).size).toBe(5);
+    },
+  );
+});
+
+test("decryption errors do not disclose the secret name", async () => {
+  const t = initConvexTest();
+  const name = "private-provider-account";
+  const { secretId } = await t.mutation(api.lib.put, {
+    name,
+    value: "private-value",
+  });
+  await t.run((ctx) =>
+    ctx.db.patch("secrets", secretId, { encryptedValue: "invalid" }),
+  );
+
+  const error: unknown = await t
+    .query(api.lib.get, { name, now: Date.now() })
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(ConvexError);
+  const data = (error as ConvexError<{ code: string; message: string }>).data;
+  expect(data.code).toBe("decryption_failed");
+  expect(data.message.includes(name)).toBe(false);
+});
 
 beforeEach(() => {
   resetKeyConfig();
@@ -325,9 +534,9 @@ describe("component lib — update and remove", () => {
   test("update with neither metadata nor ttlMs throws invalid_argument", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "k", value: "v" });
-    await expect(
-      t.mutation(api.lib.update, { name: "k" }),
-    ).rejects.toThrow(/at least one of metadata or ttlMs/);
+    await expect(t.mutation(api.lib.update, { name: "k" })).rejects.toThrow(
+      /at least one of metadata or ttlMs/,
+    );
   });
 
   test("remove deletes a secret", async () => {
@@ -743,5 +952,43 @@ describe("component lib — rotation", () => {
       });
     });
     expect(await t.query(api.lib.isRotationComplete, {})).toBe(false);
+  });
+});
+
+describe("rollback compatibility with 0.3.0 expiry flags", () => {
+  async function flaggedSecret() {
+    const t = initConvexTest();
+    const { secretId } = await t.mutation(api.lib.put, {
+      name: "flagged",
+      value: "v1",
+      ttlMs: 60_000,
+    });
+    await t.run((ctx) =>
+      ctx.db.patch("secrets", secretId, { expiredAt: Date.now() }),
+    );
+    const expiredAt = async () =>
+      (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiredAt;
+    return { t, expiredAt };
+  }
+
+  test("put over a flagged secret clears the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.put, { name: "flagged", value: "v2" });
+    expect(await expiredAt()).toBeUndefined();
+  });
+
+  test("update with a new ttl clears the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.update, { name: "flagged", ttlMs: 60_000 });
+    expect(await expiredAt()).toBeUndefined();
+  });
+
+  test("update of metadata alone keeps the flag", async () => {
+    const { t, expiredAt } = await flaggedSecret();
+    await t.mutation(api.lib.update, {
+      name: "flagged",
+      metadata: { owner: "x" },
+    });
+    expect(await expiredAt()).toBeTypeOf("number");
   });
 });
