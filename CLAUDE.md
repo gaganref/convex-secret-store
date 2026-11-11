@@ -31,9 +31,9 @@ The Convex peer range is `^1.39.0`. Raise it only in a minor, with a CHANGELOG
 note.
 
 convex-test does not enforce several backend limits: the five-year scheduling
-horizon, 1000 scheduled functions per mutation, and bytes read before
-`.filter`. It also omits fields the real backend adds to results. Prove a
-change that touches any of these on a local backend.
+horizon, 1000 scheduled functions per mutation, and bytes read before `.filter`.
+It also omits fields the real backend adds to results. Prove a change that
+touches any of these on a local backend.
 
 ## Decisions
 
