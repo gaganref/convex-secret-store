@@ -136,30 +136,33 @@ export function SettingsPage({
             <CardHeader>
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                  Current scope
+                  Mounted store
                 </p>
-                <CardTitle className="mt-0.5">Version summary</CardTitle>
+                <CardTitle className="mt-0.5">Key versions in use</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {snapshot.versionCounts.length === 0 ? (
+                {snapshot.keyVersions.length === 0 ? (
                   <span className="text-xs text-muted-foreground">
-                    No secrets in this scope yet.
+                    No secrets in this store yet.
                   </span>
                 ) : (
-                  snapshot.versionCounts.map((entry) => (
-                    <Badge key={entry.keyVersion} variant="outline">
-                      key v{entry.keyVersion} ·{" "}
-                      {formatCountLabel(entry.count, "row")}
+                  snapshot.keyVersions.map((version) => (
+                    <Badge key={version} variant="outline">
+                      key v{version}
                     </Badge>
                   ))
                 )}
               </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {snapshot.snapshotComplete
+                  ? "Secret summary for this namespace."
+                  : "Secret summary for the first 100 secrets in this namespace."}
+              </p>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge variant="outline">
-                  {formatCountLabel(snapshot.totalSecrets, "secret")} in this
-                  scope
+                  {formatCountLabel(snapshot.totalSecrets, "secret")} loaded
                 </Badge>
                 <Badge
                   variant={
@@ -171,7 +174,9 @@ export function SettingsPage({
                     : "None expired"}
                 </Badge>
                 <Badge
-                  variant={snapshot.rotationComplete ? "default" : "destructive"}
+                  variant={
+                    snapshot.rotationComplete ? "default" : "destructive"
+                  }
                 >
                   {snapshot.rotationComplete
                     ? "Rotation complete"
@@ -188,15 +193,18 @@ export function SettingsPage({
                 <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
                   Rotation
                 </p>
-                <CardTitle className="mt-0.5">Rewrap onto the active key</CardTitle>
+                <CardTitle className="mt-0.5">
+                  Rewrap onto the active key
+                </CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <CardDescription>
-                Rewrap every secret's DEK onto the active KEK version; the secret
-                plaintext is never rewritten. Rotation only has an effect after a
-                newer key version is added to <span className="font-mono">SECRET_STORE_KEYS</span>{" "}
-                and the app is redeployed.
+                Rewrap every secret's DEK onto the active KEK version; the
+                secret plaintext is never rewritten. Rotation only has an effect
+                after a newer key version is added to{" "}
+                <span className="font-mono">SECRET_STORE_KEYS</span> and the app
+                is redeployed.
               </CardDescription>
               <Button
                 size="xs"

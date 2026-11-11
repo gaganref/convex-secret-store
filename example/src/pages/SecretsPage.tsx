@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -37,16 +37,19 @@ export function SecretsPage({
   workspace: string;
   environment: Environment;
 }) {
-  const result = useQuery(api.example.listSecrets, {
-    workspace,
-    environment,
-    paginationOpts: { numItems: 50, cursor: null },
-  });
+  const {
+    results: secretRows,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.example.listSecrets,
+    { workspace, environment },
+    { initialNumItems: 50 },
+  );
 
   const putSecret = useMutation(api.example.putSecret);
   const removeSecret = useMutation(api.example.removeSecret);
 
-  const rows = result?.page;
   const [createOpen, setCreateOpen] = useState(false);
   const [replaceTarget, setReplaceTarget] = useState<SecretRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -55,14 +58,12 @@ export function SecretsPage({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
-    const page = rows ?? [];
-    const total = page.length;
-    const expired = page.filter(
+    const total = secretRows.length;
+    const expired = secretRows.filter(
       (row: SecretRow) => row.effectiveState === "expired",
     ).length;
     return { total, expired, active: total - expired };
-  }, [rows]);
-  const secretRows = rows ?? [];
+  }, [secretRows]);
 
   const isSubmitting = submitState !== null;
 
@@ -170,7 +171,7 @@ export function SecretsPage({
 
       {/* Stats */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge variant="outline">{stats.total} secrets</Badge>
+        <Badge variant="outline">{stats.total} secrets loaded</Badge>
         <Badge variant={stats.expired > 0 ? "destructive" : "outline"}>
           {stats.expired > 0 ? `${stats.expired} expired` : "None expired"}
         </Badge>
@@ -178,7 +179,7 @@ export function SecretsPage({
       </div>
 
       {/* Table */}
-      {result === undefined ? (
+      {status === "LoadingFirstPage" ? (
         <div
           className="flex items-center justify-center py-12 text-muted-foreground gap-2"
           role="status"
@@ -224,6 +225,18 @@ export function SecretsPage({
             />
           ))}
         </div>
+      )}
+
+      {(status === "CanLoadMore" || status === "LoadingMore") && (
+        <Button
+          variant="outline"
+          onClick={() => loadMore(50)}
+          disabled={status === "LoadingMore"}
+        >
+          {status === "LoadingMore"
+            ? "Loading secrets..."
+            : "Load more secrets"}
+        </Button>
       )}
 
       {/* Create/Replace Dialog */}

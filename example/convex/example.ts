@@ -1,11 +1,28 @@
 import { paginationOptsValidator } from "convex/server";
-import { mutation, query } from "./_generated/server.js";
-import { v } from "convex/values";
+import { mutation, query, type QueryCtx } from "./_generated/server.js";
+import { ConvexError, v } from "convex/values";
 import {
   environmentValidator,
   secrets,
   toNamespace,
 } from "./lib/secretStore.js";
+
+async function namespaceForViewer(
+  ctx: QueryCtx,
+  workspace: string,
+  environment: Parameters<typeof toNamespace>[1],
+) {
+  const identity = await ctx.auth.getUserIdentity();
+  // This public demo grants anonymous access. An authenticated host must check
+  // its membership data or trusted workspace claim before calling the component.
+  if (identity !== null && identity.workspace !== workspace.trim()) {
+    throw new ConvexError({
+      code: "forbidden",
+      message: "workspace access denied",
+    });
+  }
+  return toNamespace(workspace, environment);
+}
 
 function maskSecret(value: string) {
   if (value.length <= 8) {
@@ -66,7 +83,11 @@ export const listSecrets = query({
   },
   handler: async (ctx, args) => {
     return await secrets.list(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: await namespaceForViewer(
+        ctx,
+        args.workspace,
+        args.environment,
+      ),
       paginationOpts: args.paginationOpts,
     });
   },
@@ -139,7 +160,11 @@ export const listActivity = query({
   },
   handler: async (ctx, args) => {
     return await secrets.listEvents(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: await namespaceForViewer(
+        ctx,
+        args.workspace,
+        args.environment,
+      ),
       paginationOpts: args.paginationOpts,
     });
   },
@@ -155,6 +180,8 @@ export const getSettingsSnapshot = query({
     environment: environmentValidator,
   },
   returns: {
+    snapshotComplete: v.boolean(),
+    keyVersions: v.array(v.number()),
     totalSecrets: v.number(),
     expiredSecrets: v.number(),
     versionCounts: v.array(
@@ -163,37 +190,31 @@ export const getSettingsSnapshot = query({
     rotationComplete: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const rows: Array<{
-      keyVersion: number;
-      effectiveState: "active" | "expired";
-    }> = [];
-    let cursor: string | null = null;
-    while (true) {
-      const result = await secrets.list(ctx, {
-        namespace: toNamespace(args.workspace, args.environment),
-        paginationOpts: { numItems: 100, cursor },
-      });
-      rows.push(...result.page);
-      if (result.isDone) break;
-      cursor = result.continueCursor;
-    }
-
+    const result = await secrets.list(ctx, {
+      namespace: await namespaceForViewer(
+        ctx,
+        args.workspace,
+        args.environment,
+      ),
+      paginationOpts: { numItems: 100, cursor: null },
+    });
     const versionCounts = new Map<number, number>();
     let expiredSecrets = 0;
-    for (const row of rows) {
+    for (const row of result.page) {
       versionCounts.set(
         row.keyVersion,
         (versionCounts.get(row.keyVersion) ?? 0) + 1,
       );
       if (row.effectiveState === "expired") expiredSecrets += 1;
     }
-
     return {
-      totalSecrets: rows.length,
+      totalSecrets: result.page.length,
       expiredSecrets,
       versionCounts: Array.from(versionCounts.entries())
         .map(([keyVersion, count]) => ({ keyVersion, count }))
         .sort((a, b) => a.keyVersion - b.keyVersion),
+      snapshotComplete: result.isDone,
+      keyVersions: await secrets.keyVersions(ctx),
       rotationComplete: await secrets.isRotationComplete(ctx),
     };
   },

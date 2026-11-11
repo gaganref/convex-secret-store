@@ -1,10 +1,28 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  test,
+  vi,
+} from "vitest";
 import { ConvexError } from "convex/values";
 import { SecretStore, isSecretStoreError } from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
 import { resetKeyConfig } from "../component/keys.js";
-import type { RunMutationCtx, RunQueryCtx } from "./types.js";
+import type {
+  PaginationOptions as NativePaginationOptions,
+  PaginationResult,
+} from "convex/server";
+import type {
+  PaginationOptions,
+  ListItem,
+  ListResult,
+  RunMutationCtx,
+  RunQueryCtx,
+} from "./types.js";
 
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
@@ -315,4 +333,52 @@ describe("SecretStore facade", () => {
     const eventsResult = await secrets.cleanupEvents(mutationCtx);
     expect(eventsResult).toEqual({ deleted: 0, isDone: true });
   });
+});
+
+test("pagination types accept native options and preserve optional result fields", () => {
+  expectTypeOf<PaginationOptions>().toEqualTypeOf<NativePaginationOptions>();
+  expectTypeOf<ListResult<Record<string, unknown>>>().toExtend<
+    PaginationResult<ListItem<Record<string, unknown>>>
+  >();
+  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
+    "splitCursor",
+  );
+  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
+    "pageStatus",
+  );
+});
+
+test.each(["list", "listEvents"] as const)(
+  "%s forwards native options and split results",
+  async (operation) => {
+    const paginationOpts: PaginationOptions = {
+      numItems: 10,
+      cursor: "start",
+      endCursor: "end",
+      maximumRowsRead: 20,
+      maximumBytesRead: 1024,
+    };
+    const result = {
+      page: [],
+      isDone: false,
+      continueCursor: "end",
+      splitCursor: "middle",
+      pageStatus: "SplitRequired" as const,
+    };
+    const runQuery = vi.fn().mockResolvedValue(result);
+    const store = new SecretStore(components.secretStore);
+    expect(await store[operation]({ runQuery }, { paginationOpts })).toEqual(
+      result,
+    );
+    expect(runQuery.mock.calls[0]?.[1]).toMatchObject({ paginationOpts });
+  },
+);
+
+test("keyVersions reports versions in use through the facade", async () => {
+  const t = initConvexTest();
+  const { mutationCtx, queryCtx } = ctxFrom(t);
+  const store = new SecretStore(components.secretStore);
+  expect(await store.keyVersions(queryCtx)).toEqual([]);
+  await store.put(mutationCtx, { name: "one", value: "v" });
+  expect(await store.keyVersions(queryCtx)).toEqual([1]);
 });

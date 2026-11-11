@@ -69,9 +69,6 @@
       "default": "./dist/component/convex.config.js"
     }
   },
-  "dependencies": {
-    "convex-helpers": "^0.1.134"
-  },
   "peerDependencies": {
     "convex": "^1.39.0"
   },
