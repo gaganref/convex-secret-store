@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.3.0
+
+Live expiry, rotation that finishes, built-in pagination, and the encryption
+core as its own export. Read the
+[upgrade guide](./docs/guides/upgrading.md) before you upgrade. It covers the
+three breaking changes and how to roll back to 0.2.1.
+
+### Breaking
+
+- `list` and `listEvents` use Convex's built-in pagination. Convex allows one
+  paginated call per query, counting calls into a component, so a query that
+  calls `list` more than once, or calls `list` and `listEvents` together, now
+  throws. Give each paginated read its own query.
+- `rotate`'s `skipped` counts only secrets whose data key failed to unwrap.
+  Secrets on a removed key version are no longer counted there. Call the new
+  `orphanKeyVersions` to find them.
+- Each `put` or `update` that writes an expiry schedules one function while
+  more than 500 of the mutation's 1000 scheduling slots remain. A host mutation
+  that writes expiring secrets and then schedules more than 500 functions of
+  its own can now hit Convex's limit.
+
+### Added
+
+- A secret flips to expired at its `expiresAt`, so open pages update without a
+  reload. Expiries more than about five years out get no scheduled function and
+  still read as expired on time through `now`.
+- `keyVersions` and `orphanKeyVersions` list the key versions in use and the
+  ones with no configured key.
+- `convex-secret-store/envelope` exports `encryptSecret`, `decryptSecret`,
+  `rewrapDEK`, `importKey`, `parseKeyEntries`, `defineKeys`, and `KeyEntry`,
+  with no Convex dependency. Other runtimes can read and write values the
+  component stores (#3).
+- `list` and `listEvents` work with `usePaginatedQuery`.
+
+### Fixes
+
+- Rotation no longer stops when 100 or more secrets on a removed or replaced key
+  sit ahead of rotatable ones. It works through each key version, passes the
+  rows it cannot rewrap, and restarts its scan when the configured keys change.
+  Each batch logs one warning per orphan version and one per failed unwrap.
+- Rotation and cleanup batches stop at 100 rows or a bytes-read budget,
+  whichever comes first, so secrets with large metadata no longer exceed
+  Convex's read limit.
+- The example app's Secrets page loads more than 50 secrets, and its Activity
+  page filters by event type on the server.
+
+### Compatibility
+
+- Function names, arguments, and result fields are unchanged, so strict
+  `returns` validators in host code keep passing. `get` and `list` on the
+  component accept an optional `now`. The client still passes `Date.now()`.
+- The schema is unchanged, and there is no migration to run. Secrets written by
+  0.2.x read correctly, and each gets live expiry at its next write.
+- A page cursor from 0.2.x restarts at the first page, with no error.
+- `convex-helpers` is no longer a dependency, so the peer warning from 0.2.1 is
+  gone. The `convex` peer range stays `^1.39.0`.
+- The example binds `SECRET_STORE_KEYS` with `app.env.SECRET_STORE_KEYS`, so a
+  key added with `npx convex env set` takes effect without a push.
+
+### Docs
+
+- The README is now a quick start. Guides for keys, expiry, cleanup, other
+  runtimes, and upgrading, plus a reference and a security page, live in
+  [`docs/`](./docs).
+- The old README's direct cron examples failed to push, because a cron cannot
+  target a component's function. The guides use wrapper mutations.
+- `SECRET_STORE_DEFAULT_TTL_MS` takes effect only when the app declares it and
+  passes it in `app.use`. The expiry guide shows how.
+
 ## 0.2.1
 
 A security and maintenance release with no API changes. Upgrade if your app
