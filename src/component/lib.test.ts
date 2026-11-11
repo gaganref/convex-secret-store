@@ -421,34 +421,7 @@ test("decryption errors do not disclose the secret name", async () => {
   expect(data.message.includes(name)).toBe(false);
 });
 
-beforeEach(async () => {
-  // convex-test uses JSON-array cursors, unlike the backend's opaque cursors.
-  // Wrap them at the database boundary so legacy-cursor detection stays real.
-  const t = initConvexTest();
-  await t.run(async (ctx) => {
-    const query = ctx.db.query("secrets").order("asc");
-    const prototype = Object.getPrototypeOf(query) as typeof query;
-    const paginate = prototype.paginate;
-    const decode = (cursor: string | null | undefined) =>
-      cursor?.startsWith("native:") ? cursor.slice(7) : cursor;
-    vi.spyOn(prototype, "paginate").mockImplementation(async function (
-      this: typeof query,
-      options: PaginationOptions,
-    ) {
-      const result = await paginate.call(this, {
-        ...options,
-        cursor: decode(options.cursor) ?? null,
-        endCursor: decode(options.endCursor),
-      });
-      return {
-        ...result,
-        continueCursor: `native:${result.continueCursor}`,
-        splitCursor: result.splitCursor
-          ? `native:${result.splitCursor}`
-          : result.splitCursor,
-      };
-    });
-  });
+beforeEach(() => {
   resetKeyConfig();
   process.env.SECRET_STORE_KEYS = KEYS;
 });
