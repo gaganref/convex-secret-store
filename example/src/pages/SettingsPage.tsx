@@ -203,8 +203,7 @@ export function SettingsPage({
                 Rewrap every secret's DEK onto the active KEK version; the
                 secret plaintext is never rewritten. Rotation only has an effect
                 after a newer key version is added to{" "}
-                <span className="font-mono">SECRET_STORE_KEYS</span> and the app
-                is redeployed.
+                <span className="font-mono">SECRET_STORE_KEYS</span>.
               </CardDescription>
               <Button
                 size="xs"

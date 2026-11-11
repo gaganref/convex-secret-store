@@ -515,8 +515,9 @@ The [`example/`](./example) directory contains a small Vite + Convex app:
 - **Settings** — version counts per scope, rotation controls, cleanup buttons,
   and demo data seeding
 
-The example mounts the component with `defineKeys({ 1: process.env.MY_APP_KEK_V1!, 2: process.env.MY_APP_KEK_V2! })`,
-demonstrating the validated-env pattern.
+The example binds `SECRET_STORE_KEYS: app.env.SECRET_STORE_KEYS` by
+reference, so a key added with `npx convex env set SECRET_STORE_KEYS` takes
+effect without a push.
 
 > **Note:** The example UI is intentionally simple and unauthenticated. In a
 > real app, gate secret read/write flows behind your auth and authorization
