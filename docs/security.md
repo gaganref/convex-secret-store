@@ -26,13 +26,12 @@ either way.
 
 Since 0.2, the component reads its keys from its own environment variables and
 does the encryption itself. Your code calls one function to encrypt and store,
-in one transaction, and never handles keys. The trade is supply-chain exposure.
-A malicious release of this package could now send decrypted values somewhere,
-where the old design would have shown it only ciphertext. Pin the dependency
-with your lockfile and review each update before you install it. The trade is
-worth it. The old boundary protected nothing real, and the simpler API removes
-ways to get key handling wrong.
-[ADR 0001](adr/0001-component-side-encryption.md) records the decision.
+in one transaction, and never handles keys. The simpler API removes ways to get
+key handling wrong. Supply-chain exposure is the same in both designs. This
+package's code sees plaintext values and keys either way, so a malicious release
+could send them somewhere. Pin the dependency with your lockfile and review each
+update before you install it. [ADR 0001](adr/0001-component-side-encryption.md)
+records the decision.
 
 ## Each ciphertext is bound to its row
 

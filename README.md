@@ -183,6 +183,7 @@ Found a bug, or want a feature?
 ```sh
 npm install
 npm run dev
+npm run build
 npm test
 npm run typecheck
 npm run lint

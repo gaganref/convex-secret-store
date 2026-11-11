@@ -235,8 +235,11 @@ If the material under a version changes, secrets on that version cannot be
 decrypted:
 
 - `get` and `getOrThrow` throw `decryption_failed`.
-- `rotate` counts each of those secrets in `skipped` and logs a warning with the
-  secret's name and key version. Warnings never contain key material or values.
+- If the version is older than the active one, `rotate` counts each of those
+  secrets in `skipped` and logs a warning with the secret's name and key
+  version. Warnings never contain key material or values.
+- If the version is the active one, `rotate` leaves those secrets alone and
+  reports nothing. Only reads show the failure.
 
 To recover, restore the original material under that version, or delete the
 affected secrets with `remove`.
