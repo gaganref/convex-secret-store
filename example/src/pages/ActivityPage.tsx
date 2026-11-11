@@ -53,6 +53,7 @@ export function ActivityPage({
       return event.name.toLowerCase().includes(deferredSearch);
     });
   }, [activity, deferredSearch]);
+  const noActivity = activity.length === 0 && typeFilter === "all";
 
   function badgeVariant(type: string) {
     switch (type) {
@@ -132,11 +133,15 @@ export function ActivityPage({
       ) : filtered.length === 0 ? (
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>No matching events</EmptyTitle>
+            <EmptyTitle>
+              {noActivity ? "No activity yet" : "No matching events"}
+            </EmptyTitle>
             <EmptyDescription>
-              {activity.length === 0
-                ? "No events match this type. Choose another type or add a secret."
-                : "Change the filters to find activity in the loaded events."}
+              {noActivity
+                ? "Events appear here when you add, change, or remove a secret."
+                : activity.length === 0
+                  ? "No events match this type. Choose another type or add a secret."
+                  : "Change the filters to find activity in the loaded events."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
