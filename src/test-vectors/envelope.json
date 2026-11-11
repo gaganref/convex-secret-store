@@ -1,0 +1,49 @@
+{
+  "keys": [
+    {
+      "version": 1,
+      "value": "kH6mwc/0yVOaPYxbagyyQLTmYVvvsnmjyFXrV6LISNA="
+    },
+    {
+      "version": 2,
+      "value": "fhhWNoED25Namn2xYU91e6daTr1lBsEU6QMw2ubIcKk="
+    }
+  ],
+  "vectors": [
+    {
+      "namespace": "s8:production",
+      "name": "api-key",
+      "plaintext": "component secret 🔐\nline two",
+      "stored": {
+        "encryptedValue": "0p3FdPKq89MZzgMMqwXkdwaIoQYkwQ5RoVBfYTyIiQtZ0I5K3m0gQ4kOQUtaqA",
+        "iv": "NG07z2ohszLHGM4z",
+        "wrappedDEK": "A1snCdpp4f6-Ob7HOvkNvell2N1n1r_M_LnHpne_3eCTwitQqA0bZkyYmhnEYZ_N",
+        "dekIv": "Ho1fzv9ePcjcj6kO",
+        "keyVersion": 1
+      }
+    },
+    {
+      "name": "default-secret",
+      "plaintext": "no namespace",
+      "stored": {
+        "encryptedValue": "Lf3Zt3NQKmP2aJkxRdih0NzEQzjJmycZxlR2HQ",
+        "iv": "7Ohh-JCC3iy70r-U",
+        "wrappedDEK": "4j53DIpRxzUU-b8bnq4manRJo1QYDCYKxZzHNBMWhpzlUz4-Yu02WlHbOWNbVr_j",
+        "dekIv": "Q0Y2CJJ4psJdv9Nw",
+        "keyVersion": 1
+      }
+    },
+    {
+      "namespace": "s8:staging",
+      "name": "empty-secret",
+      "plaintext": "",
+      "stored": {
+        "encryptedValue": "bFw1PPDoJlXqBBLm-f9YTg",
+        "iv": "WX8pMT42LHY_b91w",
+        "wrappedDEK": "ngVEBcMpTBmQJQEDx9X-ex-zyfmfxgCxomHdhOgZoKrV72AtdKnH3lfZkxCMBHFw",
+        "dekIv": "Js2RjcWLfpIGTjp9",
+        "keyVersion": 2
+      }
+    }
+  ]
+}
