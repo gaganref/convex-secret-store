@@ -194,12 +194,16 @@ export class SecretStore<
     return await ctx.runQuery(this.component.lib.keyVersions, {});
   }
 
+  /** Key versions in use whose KEKs are not configured. At most 100 versions. */
+  async orphanKeyVersions(ctx: RunQueryCtx): Promise<number[]> {
+    return await ctx.runQuery(this.component.lib.orphanKeyVersions, {});
+  }
+
   /**
-   * Rewrap secrets onto the active KEK version. Call once after deploying a new
-   * key — it drains in the background; safe to call again to resume a stalled
-   * run. Returns the first batch's `{ rotated, skipped, isDone }`. `skipped`
-   * counts orphan rows whose `keyVersion` is no longer configured (or whose
-   * material was replaced under the same version, which is unsupported).
+   * Rewrap secrets onto the active KEK version and drain in the background.
+   * Counts and `isDone` describe the returned batch. `skipped` counts failed
+   * unwraps. Use `isRotationComplete` to check completion. Call again after
+   * key recovery to retry secrets left behind by a finished chain.
    */
   async rotate(ctx: RunMutationCtx): Promise<RotateResult> {
     return await ctx.runMutation(this.component.lib.rotate, {});

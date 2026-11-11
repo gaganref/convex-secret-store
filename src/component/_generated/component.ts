@@ -138,6 +138,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
+      orphanKeyVersions: FunctionReference<
+        "query",
+        "internal",
+        {},
+        Array<number>,
+        Name
+      >;
       put: FunctionReference<
         "mutation",
         "internal",

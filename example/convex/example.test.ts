@@ -134,6 +134,39 @@ describe("example app", () => {
     expect(result).toEqual({ rotated: 0, skipped: 0, isDone: true });
   });
 
+  test("runRotation keeps its exact result when an orphan version is present", async () => {
+    const t = initConvexTest();
+    const put = (name: string) =>
+      t.mutation(api.example.putSecret, {
+        workspace: "acme",
+        environment: "production",
+        name,
+        value: "kept",
+      });
+    await put("orphan");
+    // eslint-disable-next-line @convex-dev/no-process-env -- Configure the component's test environment.
+    process.env.SECRET_STORE_KEYS = defineKeys({
+      2: Buffer.alloc(32, 2).toString("base64"),
+    });
+    await put("healthy");
+    // eslint-disable-next-line @convex-dev/no-process-env -- Configure the component's test environment.
+    process.env.SECRET_STORE_KEYS = defineKeys({
+      2: Buffer.alloc(32, 2).toString("base64"),
+      3: Buffer.alloc(32, 3).toString("base64"),
+    });
+    expect(await t.mutation(api.example.runRotation, {})).toEqual({
+      rotated: 1,
+      skipped: 0,
+      isDone: true,
+    });
+    const snapshot = await t.query(api.example.getSettingsSnapshot, {
+      workspace: "acme",
+      environment: "production",
+    });
+    expect(snapshot.keyVersions).toEqual([1, 3]);
+    expect(snapshot.rotationComplete).toBe(false);
+  });
+
   test("runCleanup and runEventCleanup remove expired data", async () => {
     const t = initConvexTest();
     await t.mutation(api.example.putSecret, {

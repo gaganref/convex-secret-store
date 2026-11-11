@@ -1,6 +1,6 @@
 # Key rotation iterates a self-consuming slice — no cursor, no progress table
 
-/ Status: accepted
+/ Status: superseded by [ADR 0006](0006-rotation-by-version.md)
 
 Key rotation rewraps every secret's DEK from older KEK versions onto the active
 version. It runs as a **single self-rescheduling component mutation**: each batch

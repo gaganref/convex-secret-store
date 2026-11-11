@@ -457,12 +457,14 @@ describe("key versions in use", () => {
         await ctx.db.patch("secrets", secretId, { keyVersion: version });
       });
     }
-    await expect(t.query(api.lib.keyVersions, {})).rejects.toMatchObject({
-      data: {
-        code: "invalid_argument",
-        message: "store exceeds 100 distinct key versions",
-      },
-    });
+    for (const query of [api.lib.keyVersions, api.lib.orphanKeyVersions]) {
+      await expect(t.query(query, {})).rejects.toMatchObject({
+        data: {
+          code: "invalid_argument",
+          message: "store exceeds 100 distinct key versions",
+        },
+      });
+    }
   });
 });
 
@@ -1173,7 +1175,8 @@ describe("component lib — rotation", () => {
     process.env.SECRET_STORE_KEYS = defineKeys({ 2: RAW_V2 });
 
     const result = await t.mutation(api.lib.rotate, {});
-    expect(result).toEqual({ rotated: 0, skipped: 1, isDone: true });
+    expect(result).toEqual({ rotated: 0, skipped: 0, isDone: true });
+    expect(await t.query(api.lib.orphanKeyVersions, {})).toEqual([1]);
 
     // Row left untouched — still on its retired keyVersion.
     const row = await t.run((ctx) => ctx.db.get("secrets", created.secretId));
