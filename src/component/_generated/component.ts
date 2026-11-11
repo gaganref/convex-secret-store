@@ -168,7 +168,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {},
-        { isDone: boolean; rotated: number; skipped: number },
+        {
+          isDone: boolean;
+          orphanVersions?: Array<number>;
+          rotated: number;
+          skipped: number;
+        },
         Name
       >;
       update: FunctionReference<

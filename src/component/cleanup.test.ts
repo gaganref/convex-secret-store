@@ -172,3 +172,48 @@ describe("component cleanup — events", () => {
     expect(result.deleted).toBe(0);
   });
 });
+
+for (const table of ["secrets", "secretEvents"] as const) {
+  test(`cleanup drains 100 large ${table} inside transaction limits`, async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+    const t = initConvexTest();
+    for (let i = 0; i < 100; i++) {
+      const { secretId } = await t.mutation(api.lib.put, {
+        name: `large-${i}`,
+        value: "v",
+        metadata: { large: "x".repeat(256 * 1024) },
+      });
+      if (table === "secrets") {
+        await t.mutation(api.lib.update, { name: `large-${i}`, ttlMs: 1 });
+      } else {
+        await t.run((ctx) =>
+          ctx.db.insert("secretEvents", {
+            secretId,
+            name: `large-${i}`,
+            type: "created",
+            metadata: { large: "x".repeat(256 * 1024) },
+          }),
+        );
+      }
+    }
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    await t.mutation(
+      table === "secrets"
+        ? api.cleanup.cleanupSecrets
+        : api.cleanup.cleanupEvents,
+      { retentionMs: DAY },
+    );
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const remaining =
+      table === "secrets"
+        ? await t.query(api.lib.list, {
+            paginationOpts: { numItems: 1, cursor: null },
+            now: Date.now(),
+          })
+        : await t.query(api.lib.listEvents, {
+            paginationOpts: { numItems: 1, cursor: null },
+          });
+    expect(remaining.page).toEqual([]);
+  });
+}

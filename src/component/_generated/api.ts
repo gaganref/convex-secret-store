@@ -15,6 +15,7 @@ import type * as expiry from "../expiry.js";
 import type * as filters from "../filters.js";
 import type * as keys from "../keys.js";
 import type * as lib from "../lib.js";
+import type * as rotation from "../rotation.js";
 
 import type {
   ApiFromModules,
@@ -31,6 +32,7 @@ const fullApi: ApiFromModules<{
   filters: typeof filters;
   keys: typeof keys;
   lib: typeof lib;
+  rotation: typeof rotation;
 }> = anyApi as any;
 
 /**

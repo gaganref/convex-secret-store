@@ -195,11 +195,10 @@ export class SecretStore<
   }
 
   /**
-   * Rewrap secrets onto the active KEK version. Call once after deploying a new
-   * key — it drains in the background; safe to call again to resume a stalled
-   * run. Returns the first batch's `{ rotated, skipped, isDone }`. `skipped`
-   * counts orphan rows whose `keyVersion` is no longer configured (or whose
-   * material was replaced under the same version, which is unsupported).
+   * Rewrap secrets onto the active KEK version and drain in the background.
+   * Returns the first batch's counts and optional `orphanVersions` for removed
+   * keys encountered by that batch. `skipped` counts failed unwraps. Call again
+   * after restoring a removed key or correcting its material to retry.
    */
   async rotate(ctx: RunMutationCtx): Promise<RotateResult> {
     return await ctx.runMutation(this.component.lib.rotate, {});

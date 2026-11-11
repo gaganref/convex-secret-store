@@ -6,18 +6,18 @@ import {
 } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
-import { api } from "./_generated/api.js";
 import {
   effectiveStateValidator,
   metadataValidator,
   orderValidator,
   secretEventTypeValidator,
 } from "../shared.js";
-import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
+import { decryptSecret, encryptSecret } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt, scheduleExpiry } from "./expiry.js";
 import { recordEvent } from "./events.js";
 import { eventMatchesFilter } from "./filters.js";
+import { rotateBatch, rotationResultValidator } from "./rotation.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -582,99 +582,11 @@ export const keyVersions = query({
   },
 });
 
-/** Batch size for one rotation transaction. */
-const ROTATION_BATCH_SIZE = 100;
-
-/**
- * Rewrap a batch of secrets onto the active KEK version.
- *
- * Processes up to 100 rows whose `keyVersion` is below the active version in a
- * single transaction, then reschedules itself while stale rows remain. Per
- * ADR 0002 there is no cursor and no progress table — the `keyVersion < active`
- * slice is self-consuming, so each batch scans a shrinking range from the
- * start. Records a `rotated` audit event per row; safe to call repeatedly.
- */
+/** Rewrap secrets by key version, then continue in bounded internal batches. */
 export const rotate = mutation({
   args: {},
-  returns: v.object({
-    rotated: v.number(),
-    skipped: v.number(),
-    isDone: v.boolean(),
-  }),
-  handler: async (ctx) => {
-    const active = activeVersion();
-    const stale = await ctx.db
-      .query("secrets")
-      .withIndex("by_key_version", (q) => q.lt("keyVersion", active))
-      .take(ROTATION_BATCH_SIZE);
-
-    if (stale.length === 0) {
-      return { rotated: 0, skipped: 0, isDone: true };
-    }
-
-    const toKek = await getKEK(active);
-    let rotated = 0;
-    let skipped = 0;
-    for (const secret of stale) {
-      // Skip rather than throw — one orphan row must not poison the batch and
-      // wedge the rotation chain. Recovery is operator-side (re-add the KEK or
-      // `remove` the row); the count is surfaced via `skipped`.
-      if (!hasVersion(secret.keyVersion)) {
-        console.warn(
-          `secret-store: cannot rotate secret "${secret.name}" — ` +
-            `keyVersion ${secret.keyVersion} is not configured. ` +
-            `Re-add the retired KEK or delete the row.`,
-        );
-        skipped++;
-        continue;
-      }
-      let rewrapped;
-      try {
-        rewrapped = await rewrapDEK({
-          wrappedDEK: secret.wrappedDEK,
-          dekIv: secret.dekIv,
-          namespace: secret.namespace,
-          name: secret.name,
-          fromVersion: secret.keyVersion,
-          toVersion: active,
-          fromKek: await getKEK(secret.keyVersion),
-          toKek,
-        });
-      } catch {
-        // Version is configured but unwrap failed — almost always because the
-        // operator replaced the KEK material under the same version number
-        // (unsupported; versions are immutable).
-        console.warn(
-          `secret-store: cannot rotate secret "${secret.name}" — ` +
-            `rewrap under keyVersion ${secret.keyVersion} failed. ` +
-            `KEK material for that version may have been replaced.`,
-        );
-        skipped++;
-        continue;
-      }
-      await ctx.db.patch("secrets", secret._id, {
-        wrappedDEK: rewrapped.wrappedDEK,
-        dekIv: rewrapped.dekIv,
-        keyVersion: active,
-      });
-      await recordEvent(ctx, {
-        secretId: secret._id,
-        namespace: secret.namespace,
-        name: secret.name,
-        type: "rotated",
-        metadata: { fromVersion: secret.keyVersion, toVersion: active },
-      });
-      rotated++;
-    }
-
-    // No progress this batch means only orphan rows remain — stop rescheduling
-    // so the chain doesn't spin forever. Operator must intervene.
-    const isDone = stale.length < ROTATION_BATCH_SIZE || rotated === 0;
-    if (!isDone) {
-      await ctx.scheduler.runAfter(0, api.lib.rotate, {});
-    }
-    return { rotated, skipped, isDone };
-  },
+  returns: rotationResultValidator,
+  handler: async (ctx) => await rotateBatch(ctx),
 });
 
 /**
