@@ -29,27 +29,30 @@ export function ActivityPage({
   workspace: string;
   environment: Environment;
 }) {
+  const [typeFilter, setTypeFilter] = useState<EventFilter>("all");
   const {
     results: activity,
     status,
     loadMore,
   } = usePaginatedQuery(
     api.example.listActivity,
-    { workspace, environment },
+    {
+      workspace,
+      environment,
+      type: typeFilter === "all" ? undefined : typeFilter,
+    },
     { initialNumItems: 50 },
   );
-  const [typeFilter, setTypeFilter] = useState<EventFilter>("all");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   type ActivityRow = (typeof activity)[number];
 
   const filtered = useMemo(() => {
     return activity.filter((event: ActivityRow) => {
-      if (typeFilter !== "all" && event.type !== typeFilter) return false;
       if (deferredSearch.length === 0) return true;
       return event.name.toLowerCase().includes(deferredSearch);
     });
-  }, [activity, deferredSearch, typeFilter]);
+  }, [activity, deferredSearch]);
 
   function badgeVariant(type: string) {
     switch (type) {
@@ -112,7 +115,8 @@ export function ActivityPage({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Filters apply to the {activity.length} loaded events.
+        Name search applies to the {activity.length} loaded events. Type filters
+        apply to all events.
       </p>
 
       {/* Event list */}
@@ -131,7 +135,7 @@ export function ActivityPage({
             <EmptyTitle>No matching events</EmptyTitle>
             <EmptyDescription>
               {activity.length === 0
-                ? "Add a secret to start the audit trail for this namespace."
+                ? "No events match this type. Choose another type or add a secret."
                 : "Change the filters to find activity in the loaded events."}
             </EmptyDescription>
           </EmptyHeader>

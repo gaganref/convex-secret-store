@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ConvexError } from "convex/values";
-import type { FunctionReturnType, PaginationOptions } from "convex/server";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -9,6 +9,20 @@ import { resetKeyConfig } from "./keys.js";
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
 const KEYS = defineKeys({ 1: RAW_V1 });
+
+// Captured with convex-helpers 0.1.134 on the indexes used by 0.2.1.
+const legacyCursors = {
+  by_namespace:
+    '["workspace",1794376016189.003,"00000000000000010003secretEvents"]',
+  by_namespace_and_name:
+    '["workspace","one",1794376016189.003,"00000000000000010003secretEvents"]',
+  by_namespace_and_type:
+    '["workspace","created",1794376016189.003,"00000000000000010003secretEvents"]',
+  by_namespace_and_updated_at:
+    '["workspace",1235,1794376016189.002,"0000000000000000000010002secrets"]',
+  by_secret_id:
+    '["0000000000000000000010000secrets",1794376016189.003,"00000000000000010003secretEvents"]',
+};
 
 async function expectOnlyMatchingRows<Row>(
   pending: Promise<{ page: Row[] }>,
@@ -46,7 +60,12 @@ describe("pagination filter isolation", () => {
         namespace: "z-attacker",
         paginationOpts: {
           numItems: 10,
-          cursor: JSON.stringify(["a-victim", Number.MAX_VALUE]),
+          cursor: JSON.stringify([
+            "a-victim",
+            Number.MAX_VALUE,
+            Number.MAX_VALUE,
+            "foreign-id",
+          ]),
         },
         now: Date.now(),
       }),
@@ -126,6 +145,7 @@ describe("pagination filter isolation", () => {
               ...(filter === "name" ? ["public-name"] : []),
               ...(filter === "type" ? ["created"] : []),
               Number.MAX_VALUE,
+              "foreign-id",
             ]),
           },
         }),
@@ -263,7 +283,10 @@ describe("native pagination", () => {
     });
     const restarted = await t.query(api.lib.list, {
       ...args,
-      paginationOpts: { numItems: 2, cursor: '["workspace",0]' },
+      paginationOpts: {
+        numItems: 2,
+        cursor: legacyCursors.by_namespace_and_updated_at,
+      },
     });
     expect(restarted).toEqual(first);
   });
@@ -277,7 +300,11 @@ describe("native pagination", () => {
     });
     const restarted = await t.query(api.lib.list, {
       now: 0,
-      paginationOpts: { numItems: 2, cursor: "[", endCursor: '["legacy",0]' },
+      paginationOpts: {
+        numItems: 2,
+        cursor: legacyCursors.by_namespace_and_updated_at,
+        endCursor: legacyCursors.by_namespace_and_updated_at,
+      },
     });
     expect(restarted).toEqual(first);
   });
@@ -294,22 +321,60 @@ describe("native pagination", () => {
       name: "one",
       value: "new",
     });
-    for (const filter of [
-      { namespace: "workspace" },
-      { namespace: "workspace", name: "one" },
-      { namespace: "workspace", type: "updated" as const },
-      { secretId },
-    ]) {
+    for (const [filter, cursor] of [
+      [{ namespace: "workspace" }, legacyCursors.by_namespace],
+      [
+        { namespace: "workspace", name: "one" },
+        legacyCursors.by_namespace_and_name,
+      ],
+      [
+        { namespace: "workspace", type: "updated" as const },
+        legacyCursors.by_namespace_and_type,
+      ],
+      [{ secretId }, legacyCursors.by_secret_id],
+    ] as const) {
       const first = await t.query(api.lib.listEvents, {
         ...filter,
         paginationOpts: { numItems: 1, cursor: null },
       });
       const restarted = await t.query(api.lib.listEvents, {
         ...filter,
-        paginationOpts: { numItems: 1, cursor: '["workspace",0]' },
+        paginationOpts: { numItems: 1, cursor },
       });
       expect(restarted).toEqual(first);
     }
+  });
+
+  test("a native cursor resumes when only the end cursor is legacy", async () => {
+    const t = initConvexTest();
+    for (let i = 0; i < 5; i++) {
+      await t.mutation(api.lib.put, {
+        namespace: "workspace",
+        name: `secret-${i}`,
+        value: "v",
+      });
+    }
+    const args = { namespace: "workspace", now: Date.now() };
+    const first = await t.query(api.lib.list, {
+      ...args,
+      paginationOpts: { numItems: 2, cursor: null },
+    });
+    const options = { numItems: 2, cursor: first.continueCursor };
+    const second = await t.query(api.lib.list, {
+      ...args,
+      paginationOpts: options,
+    });
+    const mixed = await t.query(api.lib.list, {
+      ...args,
+      paginationOpts: {
+        ...options,
+        endCursor: legacyCursors.by_namespace_and_updated_at,
+      },
+    });
+    expect(mixed).toEqual(second);
+    expect(mixed.page.map((row) => row.secretId)).not.toEqual(
+      first.page.map((row) => row.secretId),
+    );
   });
 
   test("list preserves native read-budget split fields", async () => {

@@ -352,11 +352,11 @@ describe("SecretStore facade", () => {
       const filters =
         filter === "secretId"
           ? { secretId }
-          : {
-              namespace: "workspace",
-              ...(filter === "name" ? { name: "secret" } : {}),
-              ...(filter === "type" ? { type: "updated" as const } : {}),
-            };
+          : filter === "name"
+            ? { namespace: "workspace", name: "secret" }
+            : filter === "type"
+              ? { namespace: "workspace", type: "updated" as const }
+              : { namespace: "workspace" };
       const expected = await secrets.listEvents(queryCtx, {
         ...filters,
         paginationOpts: { numItems: 10, cursor: null },

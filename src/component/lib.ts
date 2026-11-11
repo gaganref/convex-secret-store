@@ -23,13 +23,37 @@ import { eventMatchesFilter } from "./filters.js";
 const MAX_VALUE_BYTES = 64 * 1024;
 const byteCounter = new TextEncoder();
 
+function isLegacyCursor(cursor: string | null | undefined): boolean {
+  if (!cursor?.startsWith("[")) return false;
+  try {
+    const key: unknown = JSON.parse(cursor);
+    // convex-helpers serializes index values directly. Every old list index
+    // ends with numeric _creationTime and string _id; convex-test encodes
+    // each value as a string instead. "[]" is the helpers' end sentinel.
+    return (
+      Array.isArray(key) &&
+      (key.length === 0 ||
+        ((key.length === 3 || key.length === 4) &&
+          typeof key[0] === "string" &&
+          (key.length === 3 ||
+            typeof key[1] === "string" ||
+            typeof key[1] === "number") &&
+          typeof key[key.length - 2] === "number" &&
+          typeof key[key.length - 1] === "string"))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function nativePaginationOptions(
   options: PaginationOptions,
 ): PaginationOptions {
-  // Old convex-helpers cursors cannot be resumed by the native paginator.
-  return options.cursor?.startsWith("[") || options.endCursor?.startsWith("[")
-    ? { ...options, cursor: null, endCursor: null }
-    : options;
+  return {
+    ...options,
+    cursor: isLegacyCursor(options.cursor) ? null : options.cursor,
+    endCursor: isLegacyCursor(options.endCursor) ? null : options.endCursor,
+  };
 }
 
 function assertValidNamespace(namespace: string | undefined): void {

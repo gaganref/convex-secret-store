@@ -34,6 +34,7 @@ const listActivity = makeFunctionReference<
     workspace: string;
     environment: "production";
     paginationOpts: PaginationOptions;
+    type?: "created" | "updated" | "deleted" | "rotated";
   }
 >("example:listActivity");
 const putSecret = makeFunctionReference<
@@ -69,32 +70,28 @@ test.each([
   { name: "listSecrets", query: listSecrets },
   { name: "listActivity", query: listActivity },
 ])(
-  "$name checks namespace access before it calls the component",
+  "$name scopes anonymous demo results to the requested workspace",
   async ({ query }) => {
     const t = initConvexTest();
-    const viewer = t.withIdentity({
-      subject: "viewer",
-      issuer: "test",
-      workspace: "allowed",
+    await t.mutation(putSecret, {
+      workspace: "other",
+      environment: "production",
+      name: "private",
+      value: "v",
     });
-    await expect(
-      viewer.query(query, {
-        workspace: "other",
-        environment: "production",
-        paginationOpts: { numItems: 50, cursor: null },
-      }),
-    ).rejects.toMatchObject({ data: { code: "forbidden" } });
+    const own = await t.query(query, {
+      workspace: "other",
+      environment: "production",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(own.page).toHaveLength(1);
     expect(
-      await viewer.query(query, {
-        workspace: "allowed",
+      await t.query(query, {
+        workspace: "empty",
         environment: "production",
         paginationOpts: { numItems: 50, cursor: null },
       }),
-    ).toMatchObject({
-      page: [],
-      isDone: true,
-      continueCursor: expect.any(String),
-    });
+    ).toMatchObject({ page: [], isDone: true });
   },
 );
 
@@ -117,4 +114,33 @@ test("settings uses a bounded summary and the store-wide key versions", async ()
     snapshotComplete: false,
     keyVersions: [1],
   });
+});
+
+test("activity type filter finds events beyond the first unfiltered page", async () => {
+  const t = initConvexTest();
+  for (let i = 0; i < 55; i++) {
+    await t.mutation(putSecret, {
+      workspace: "demo",
+      environment: "production",
+      name: `secret-${i}`,
+      value: "v",
+    });
+  }
+  await t.mutation(putSecret, {
+    workspace: "demo",
+    environment: "production",
+    name: "secret-0",
+    value: "new",
+  });
+  const result = await t.query(listActivity, {
+    workspace: "demo",
+    environment: "production",
+    type: "created",
+    paginationOpts: { numItems: 50, cursor: null },
+  });
+  expect(result.page).toHaveLength(50);
+  expect(
+    result.page.every((event: { type: string }) => event.type === "created"),
+  ).toBe(true);
+  expect(result.isDone).toBe(false);
 });

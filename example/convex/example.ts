@@ -1,26 +1,24 @@
 import { paginationOptsValidator } from "convex/server";
-import { mutation, query, type QueryCtx } from "./_generated/server.js";
-import { ConvexError, v } from "convex/values";
+import {
+  mutation,
+  query,
+  type QueryCtx,
+  type MutationCtx,
+} from "./_generated/server.js";
+import { v } from "convex/values";
 import {
   environmentValidator,
   secrets,
   toNamespace,
 } from "./lib/secretStore.js";
 
-async function namespaceForViewer(
-  ctx: QueryCtx,
+function namespaceForDemo(
+  _ctx: QueryCtx | MutationCtx,
   workspace: string,
   environment: Parameters<typeof toNamespace>[1],
 ) {
-  const identity = await ctx.auth.getUserIdentity();
-  // This public demo grants anonymous access. An authenticated host must check
-  // its membership data or trusted workspace claim before calling the component.
-  if (identity !== null && identity.workspace !== workspace.trim()) {
-    throw new ConvexError({
-      code: "forbidden",
-      message: "workspace access denied",
-    });
-  }
+  // This demo has no auth. A real app must check the caller's workspace access
+  // here before returning a namespace.
   return toNamespace(workspace, environment);
 }
 
@@ -52,7 +50,7 @@ export const putSecret = mutation({
   },
   handler: async (ctx, args) => {
     return await secrets.put(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
       value: args.value,
       ttlMs: args.ttlMs,
@@ -69,7 +67,7 @@ export const removeSecret = mutation({
   returns: { removed: v.boolean() },
   handler: async (ctx, args) => {
     return await secrets.remove(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
     });
   },
@@ -83,11 +81,7 @@ export const listSecrets = query({
   },
   handler: async (ctx, args) => {
     return await secrets.list(ctx, {
-      namespace: await namespaceForViewer(
-        ctx,
-        args.workspace,
-        args.environment,
-      ),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       paginationOpts: args.paginationOpts,
     });
   },
@@ -118,7 +112,7 @@ export const previewSecret = query({
   }),
   handler: async (ctx, args) => {
     const loaded = await secrets.get(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
     });
 
@@ -157,16 +151,24 @@ export const listActivity = query({
     workspace: v.string(),
     environment: environmentValidator,
     paginationOpts: paginationOptsValidator,
+    type: v.optional(
+      v.union(
+        v.literal("created"),
+        v.literal("updated"),
+        v.literal("deleted"),
+        v.literal("rotated"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
-    return await secrets.listEvents(ctx, {
-      namespace: await namespaceForViewer(
-        ctx,
-        args.workspace,
-        args.environment,
-      ),
+    const options = {
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       paginationOpts: args.paginationOpts,
-    });
+    };
+    return await secrets.listEvents(
+      ctx,
+      args.type === undefined ? options : { ...options, type: args.type },
+    );
   },
 });
 
@@ -191,11 +193,7 @@ export const getSettingsSnapshot = query({
   },
   handler: async (ctx, args) => {
     const result = await secrets.list(ctx, {
-      namespace: await namespaceForViewer(
-        ctx,
-        args.workspace,
-        args.environment,
-      ),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       paginationOpts: { numItems: 100, cursor: null },
     });
     const versionCounts = new Map<number, number>();
@@ -265,7 +263,7 @@ export const seedDemoData = mutation({
   },
   returns: { seeded: v.number() },
   handler: async (ctx, args) => {
-    const namespace = toNamespace(args.workspace, args.environment);
+    const namespace = namespaceForDemo(ctx, args.workspace, args.environment);
     const demoSecrets = [
       {
         name: "DATABASE_URL",
