@@ -6,7 +6,7 @@ import {
 } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
-import { api, internal } from "./_generated/api.js";
+import { api } from "./_generated/api.js";
 import {
   effectiveStateValidator,
   metadataValidator,
@@ -15,16 +15,13 @@ import {
 } from "../shared.js";
 import { decryptSecret, encryptSecret, rewrapDEK } from "./crypto.js";
 import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
-import { resolveExpiresAt } from "./expiry.js";
+import { resolveExpiresAt, scheduleExpiry } from "./expiry.js";
 import { recordEvent } from "./events.js";
 import { eventMatchesFilter } from "./filters.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
 const byteCounter = new TextEncoder();
-
-// Stay one day inside Convex's five-year scheduling horizon.
-const MAX_EXPIRY_SCHEDULE_DELAY_MS = (5 * 365 - 1) * 24 * 60 * 60 * 1000;
 
 function isLegacyCursor(cursor: string | null | undefined): boolean {
   if (!cursor?.startsWith("[")) return false;
@@ -158,15 +155,7 @@ export const put = mutation({
         ...(expiresAt !== undefined ? { expiresAt } : {}),
         updatedAt: now,
       });
-      if (
-        expiresAt !== undefined &&
-        expiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
-      ) {
-        await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
-          secretId,
-          expiresAt,
-        });
-      }
+      await scheduleExpiry(ctx, secretId, expiresAt, now);
       await recordEvent(ctx, {
         secretId,
         namespace: args.namespace,
@@ -197,15 +186,7 @@ export const put = mutation({
       expiredAt: undefined,
       updatedAt: now,
     });
-    if (
-      expiresAt !== undefined &&
-      expiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
-    ) {
-      await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
-        secretId: existing._id,
-        expiresAt,
-      });
-    }
+    await scheduleExpiry(ctx, existing._id, expiresAt, now);
     await recordEvent(ctx, {
       secretId: existing._id,
       namespace: args.namespace,
@@ -418,15 +399,8 @@ export const update = mutation({
       changed.push("ttl");
     }
     await ctx.db.patch("secrets", secret._id, patch);
-    if (
-      args.ttlMs !== undefined &&
-      nextExpiresAt !== undefined &&
-      nextExpiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
-    ) {
-      await ctx.scheduler.runAt(nextExpiresAt, internal.expiry.expire, {
-        secretId: secret._id,
-        expiresAt: nextExpiresAt,
-      });
+    if (args.ttlMs !== undefined) {
+      await scheduleExpiry(ctx, secret._id, nextExpiresAt, now);
     }
     await recordEvent(ctx, {
       secretId: secret._id,

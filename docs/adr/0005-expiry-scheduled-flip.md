@@ -21,10 +21,20 @@ still supplies the read-time check.
 `put` schedules `internal.expiry.expire` when the expiry it writes is within
 five years minus one day. `update` schedules it when a supplied `ttlMs` sets a
 new expiry within that horizon. Convex rejects jobs more than five years ahead.
-The one-day margin keeps scheduling inside that limit. Far-future expiries
-remain valid, including those from `SECRET_STORE_DEFAULT_TTL_MS`, but get no
-job. Metadata-only updates keep the existing expiry and job. Removing expiry
-schedules nothing.
+The one-day margin keeps scheduling inside that limit. Before each job, the
+component reads `ctx.meta.getTransactionMetrics()`. It schedules only when
+`functionsScheduled.remaining` is greater than `HOST_SCHEDULING_RESERVE`, set
+to 500. Each expiry job leaves at least 500 scheduling slots for the host. The
+count includes scheduling by earlier component calls in the same host
+transaction. The component creates at most 500 expiry jobs per transaction, and
+fewer if the host has already scheduled jobs. It skips the job at or below the
+reserve. If transaction metrics are missing or throw, it schedules as before for
+compatibility with older test runtimes. Errors from `runAt` still reject the
+write.
+
+Far-future expiries remain valid, including those from
+`SECRET_STORE_DEFAULT_TTL_MS`, but get no job. Metadata-only updates keep the
+existing expiry and job. Removing expiry schedules nothing.
 
 The job accepts exactly `{ secretId: v.id("secrets"), expiresAt: v.number() }`.
 It reads the secret and returns without a write if the secret is absent, its
@@ -40,11 +50,12 @@ expiry. Component queries never read the wall clock. The facade keeps passing
 `now: Date.now()` as in 0.2.1. `now` is not deprecated.
 
 The flag invalidates subscribed queries. The read-time check rejects expired
-secrets before a delayed job runs, for older rows without a job, and for
-far-future expiries. Both checks are needed. The local cache repro showed that
-removing `now` let a fresh host action return expired plaintext from a cached
-component query for a row with no job. The 0.2.1 facade returned `expired` for
-the same row because it supplied a new `now`.
+secrets before a delayed job runs, for older rows without a job, for writes that
+skip a job to preserve the host reserve, and for far-future expiries. Both
+checks are needed. The local cache repro showed that removing `now` let a fresh
+host action return expired plaintext from a cached component query for a row
+with no job. The 0.2.1 facade returned `expired` for the same row because it
+supplied a new `now`.
 
 `cleanupSecrets` keeps its 0.2.1 deletion body and return shape. It does not
 scan or flag retained secrets. A trial pass that filtered unflagged secrets
@@ -52,10 +63,11 @@ after scanning the expiry index exceeded read limits on retained,
 already-flagged secrets and rolled back cleanup deletions. Removing that pass
 preserves cleanup behavior without a new index or migration.
 
-Rows written by older versions stay correct through `now`. They gain a live flip
-only after a rewrite that schedules an expiry job, either a `put` or an `update`
-with a new TTL within the scheduling horizon. Metadata-only updates and cleanup
-do not add jobs to old rows.
+Secrets without a job still read as expired through `now`. This includes old
+rows and writes that reach the scheduling reserve. They gain a live flip after
+their next rewrite that schedules a job, either a `put` or an `update` with a
+new TTL within the horizon and available scheduling budget. Metadata-only
+updates and cleanup do not add jobs.
 
 ## Rollback to 0.2.1
 
@@ -79,10 +91,10 @@ Cleanup deletions keep their existing `deleted` event with `expired_cleanup`.
 
 ## Consequences
 
-Expiring writes within the scheduling horizon cost one scheduled mutation. Old
-jobs may still run after a TTL changes, but their checks prevent them from
-changing the current secret. The flip changes neither `updatedAt` nor the
-secret's audit history.
+Expiring writes within the scheduling horizon cost one scheduled mutation when
+the transaction has more than 500 scheduling slots remaining. Old jobs may still
+run after a TTL changes, but their checks prevent them from changing the current
+secret. The flip changes neither `updatedAt` nor the secret's audit history.
 
 Subscribed host queries refresh when the expiry mutation commits, so scheduler
 delay can postpone the visible flip. Passing `now` protects each read when it

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { put } from "./lib.js";
-import { resolveExpiresAt } from "./expiry.js";
+import { resolveExpiresAt, scheduleExpiry } from "./expiry.js";
 import { api, internal } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -55,7 +54,7 @@ describe("scheduled expiry", () => {
     ).toEqual({ ok: false, reason: "expired" });
   });
 
-  test.each(["put", "overwrite", "update"] as const)(
+  test.for(["put", "overwrite", "update"] as const)(
     "%s preserves the host reserve and resumes live expiry on a later rewrite",
     async (operation, context) => {
       const t = initConvexTest();
@@ -106,8 +105,15 @@ describe("scheduled expiry", () => {
             },
           );
         }
+        await ctx.runMutation(api.lib.update, {
+          name: "reserved",
+          ttlMs: 1000,
+        });
+        expect(
+          (await ctx.meta.getTransactionMetrics()).functionsScheduled.remaining,
+        ).toBe(100);
       });
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(2000);
       await t.finishInProgressScheduledFunctions();
       expect(
         await t.query(api.lib.get, { name: "reserved", now: Date.now() }),
@@ -133,23 +139,31 @@ describe("scheduled expiry", () => {
     },
   );
 
-  test.each(["missing", "throwing"] as const)(
+  test.each(["missing meta", "missing method", "throwing"] as const)(
     "expiry still schedules when transaction metrics are %s",
     async (environment) => {
       const t = initConvexTest();
-      const { secretId, expiresAt } = await t.run((ctx) => {
+      const { secretId } = await t.mutation(api.lib.put, {
+        name: "fallback",
+        value: "v",
+      });
+      const expiresAt = Date.now() + 1000;
+      await t.run(async (ctx) => {
+        await ctx.db.patch("secrets", secretId, { expiresAt });
         Object.defineProperty(ctx, "meta", {
           value:
-            environment === "missing"
+            environment === "missing meta"
               ? undefined
-              : {
-                  ...ctx.meta,
-                  getTransactionMetrics: async () => {
-                    throw new Error("unsupported metrics");
+              : environment === "missing method"
+                ? {}
+                : {
+                    ...ctx.meta,
+                    getTransactionMetrics: async () => {
+                      throw new Error("unsupported metrics");
+                    },
                   },
-                },
         });
-        return put._handler(ctx, { name: "fallback", value: "v", ttlMs: 1000 });
+        await scheduleExpiry(ctx, secretId, expiresAt, Date.now());
       });
       vi.advanceTimersByTime(1000);
       await t.finishInProgressScheduledFunctions();
@@ -161,9 +175,16 @@ describe("scheduled expiry", () => {
 
   test("scheduler failures still reject the expiring write", async () => {
     const t = initConvexTest();
+    const { secretId } = await t.mutation(api.lib.put, {
+      name: "failed",
+      value: "v",
+    });
     await expect(
-      t.run((ctx) =>
-        put._handler(
+      t.run(async (ctx) => {
+        await ctx.db.patch("secrets", secretId, {
+          expiresAt: Date.now() + 1000,
+        });
+        await scheduleExpiry(
           {
             ...ctx,
             meta: {
@@ -179,13 +200,15 @@ describe("scheduled expiry", () => {
               },
             },
           },
-          { name: "failed", value: "v", ttlMs: 1000 },
-        ),
-      ),
+          secretId,
+          Date.now() + 1000,
+          Date.now(),
+        );
+      }),
     ).rejects.toThrow("scheduler failure");
     expect(
-      await t.query(api.lib.get, { name: "failed", now: Date.now() }),
-    ).toEqual({ ok: false, reason: "not_found" });
+      (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiresAt,
+    ).toBeUndefined();
   });
 
   test("put flips the stored secret at expiresAt without changing its audit history", async () => {
