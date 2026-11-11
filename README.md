@@ -5,536 +5,189 @@
 
 <!-- START: Include on https://convex.dev/components -->
 
-A [Convex](https://convex.dev) component for encrypted secret storage with
-versioned key rotation, expiry, and append-only audit logging. Envelope
-encryption runs inside the component; key-encryption keys (KEKs) are supplied
-through Convex's typed component environment variables.
+Store API keys, tokens and other secrets in your Convex app, encrypted at rest,
+with key rotation, expiry and an audit log.
 
-```ts
-const saved = await secrets.put(ctx, {
-  namespace: "acme:production",
-  name: "openai",
-  value: process.env.OPENAI_API_KEY!,
-  metadata: { owner: "platform" },
-});
+The component encrypts each value with keys you keep in your deployment's
+environment variables, so a copy of the database alone cannot reveal it. Only
+your own Convex functions can call the component, so your code decides who reads
+which secret.
 
-const loaded = await secrets.get(ctx, {
-  namespace: "acme:production",
-  name: "openai",
-});
+## When to use it
 
-if (loaded.ok) {
-  // loaded.value -> plaintext
-}
-```
+| You need                                                               | Use                                                                                                        |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Secrets your users or tenants add at runtime, such as a customer's key | This component                                                                                             |
+| To rotate the encryption key without rewriting every value             | This component                                                                                             |
+| A record of when each secret was created, changed or deleted           | This component                                                                                             |
+| A few fixed keys that only you set, such as your own OpenAI key        | Plain [Convex environment variables](https://docs.convex.dev/production/environment-variables)             |
+| Protection from someone with access to your Convex deployment          | A dedicated secrets manager. This component cannot give you that, because its keys live in the deployment. |
 
-Found a bug? Feature request?
-[File it here](https://github.com/gaganref/convex-secret-store/issues).
+## Quick start
 
-## What this gives you
+You need a Convex project on `convex` 1.39 or later.
 
-- envelope encryption with a per-secret DEK and versioned KEKs
-- explicit, in-place key rotation without rewriting secret plaintext
-- expiry-aware reads, with separate `get` (Result) and `getOrThrow` ergonomics
-- append-only audit events for `created`, `updated`, `deleted`, and `rotated`
-- a typed `SecretStore` facade for Convex queries, mutations, and actions
-- structured `ConvexError`s with stable codes — type-narrowed via `isSecretStoreError`
+1. Install the package.
 
-## Pre-requisite
-
-A Convex project (`convex >= 1.39`, for typed component environment variables).
-If you're new to Convex, start with the
-[Convex tutorial](https://docs.convex.dev/get-started).
-
-## Installation
-
-```sh
-npm install convex-secret-store
-```
-
-Mount the component in your app's `convex.config.ts`. The simplest setup
-declares the KEK as a validated app env var and reads it via `defineKeys`:
-
-```ts
-// convex/convex.config.ts
-import { defineApp } from "convex/server";
-import { v } from "convex/values";
-import { defineKeys } from "convex-secret-store";
-import secretStore from "convex-secret-store/convex.config";
-
-const app = defineApp({
-  env: {
-    MY_APP_KEK_V1: v.string(),
-  },
-});
-
-app.use(secretStore, {
-  env: {
-    SECRET_STORE_KEYS: defineKeys({
-      1: process.env.MY_APP_KEK_V1!,
-    }),
-  },
-});
-
-export default app;
-```
-
-Generate a KEK and set it on the deployment:
-
-```sh
-openssl rand -base64 32   # 32 random bytes as base64
-npx convex env set MY_APP_KEK_V1 "<paste the value>"
-```
-
-Construct the typed facade once and re-export it:
-
-```ts
-// convex/secrets.ts
-import { SecretStore } from "convex-secret-store";
-import { components } from "./_generated/api.js";
-
-export const secrets = new SecretStore<
-  `${string}:${"production" | "testing"}`,
-  { owner?: string; label?: string }
->(components.secretStore);
-```
-
-Use it from any query, mutation, or action:
-
-```ts
-import { action } from "./_generated/server.js";
-import { secrets } from "./secrets.js";
-
-export const callOpenAI = action({
-  handler: async (ctx) => {
-    const apiKey = await secrets.getOrThrow(ctx, {
-      namespace: "acme:production",
-      name: "openai",
-    });
-    return await fetch("https://api.openai.com/v1/...", {
-      headers: { Authorization: `Bearer ${apiKey.value}` },
-    });
-  },
-});
-```
-
-## Key configuration
-
-### `SECRET_STORE_KEYS`
-
-The component declares one required env var, `SECRET_STORE_KEYS`. Its value is a
-delimited string of versioned KEKs:
-
-```
-1:<base64>,2:<base64>
-```
-
-Each entry is `version:value`. Each KEK value is 32 bytes in standard base64:
-44 characters ending in one `=`, which is what `openssl rand -base64 32`
-prints.
-
-You can build the value with `defineKeys` (typed, eagerly validated):
-
-```ts
-defineKeys({
-  1: process.env.MY_APP_KEK_V1!,
-  2: process.env.MY_APP_KEK_V2!,
-})
-```
-
-…or set it directly on the deployment for hosts that don't want a builder:
-
-```sh
-npx convex env set SECRET_STORE_KEYS "1:AQEB...,2:AgIC..."
-```
-
-Either way, the **active key version is the highest configured version** — all
-new writes use it. Older versions remain available for decrypting existing
-rows.
-
-Duplicate versions are caught at compile time when you use `defineKeys` (object
-literals reject duplicate keys: `error TS1117`).
-
-### `SECRET_STORE_DEFAULT_TTL_MS` (optional)
-
-If set, `put` resolves an omitted `ttlMs` to `now + SECRET_STORE_DEFAULT_TTL_MS`.
-See [Expiry](#expiry) below.
-
-## API
-
-### `SecretStore`
-
-```ts
-new SecretStore<
-  Namespace extends string = string,
-  Metadata extends Record<string, unknown> = Record<string, unknown>,
->(components.secretStore)
-```
-
-The optional type parameters constrain the `namespace` shape and the `metadata`
-record at compile time. They're a typing aid only — runtime storage stays a
-plain string namespace and a freeform metadata record.
-
-### `put`
-
-```ts
-await secrets.put(ctx, {
-  namespace?: Namespace,
-  name: string,
-  value: string,                  // plaintext; max 64 KiB
-  metadata?: Metadata | null,
-  ttlMs?: number | null,
-});
-// → { secretId, createdAt, updatedAt, expiresAt?, isNew }
-```
-
-Encrypts and upserts by `namespace + name`. On overwrite, omitted `metadata` is
-preserved and `null` clears it. Expiry is recomputed every write (see below).
-
-### `get`
-
-```ts
-await secrets.get(ctx, { namespace?, name });
-// → { ok: true, value, metadata, expiresAt?, updatedAt }
-//   | { ok: false, reason: "not_found" | "expired" | "key_unavailable" }
-```
-
-Returns a discriminated result. `key_unavailable` means the row's `keyVersion`
-is no longer in your configured `SECRET_STORE_KEYS` (you retired the key too
-soon — see [Rotation](#key-rotation)).
-
-### `getOrThrow`
-
-```ts
-await secrets.getOrThrow(ctx, { namespace?, name });
-// → { value, metadata, expiresAt?, updatedAt }
-// throws ConvexError with code "not_found" | "expired" | "key_unavailable"
-```
-
-Convenience for call sites that treat any failure as exceptional.
-
-> No dedicated `has` is exposed. For "does X exist?" checks, derive from `get`:
-> `const present = (await secrets.get(ctx, { name })).ok`.
-
-### `update`
-
-```ts
-await secrets.update(ctx, {
-  namespace?, name,
-  metadata?: Metadata | null,
-  ttlMs?: number | null,
-});
-// → { updated, updatedAt?, expiresAt? }
-```
-
-Edits `metadata` and/or expiry **without** re-encrypting the value. Omitted
-fields are preserved; `null` clears. At least one of `metadata` or `ttlMs`
-must be supplied — calling with neither throws `invalid_argument`.
-`{ updated: false }` means the secret does not exist (symmetric with `remove`).
-
-### `remove`
-
-```ts
-await secrets.remove(ctx, { namespace?, name });
-// → { removed: boolean }
-```
-
-### `list`
-
-```ts
-await secrets.list(ctx, {
-  namespace?,
-  paginationOpts: { numItems, cursor },
-  order?: "asc" | "desc",
-});
-```
-
-Paginates secrets in a namespace, newest-`updatedAt` first by default. Each row
-carries `effectiveState: "active" | "expired"`. The decrypted value is never
-returned by `list`.
-
-### `listEvents`
-
-```ts
-await secrets.listEvents(ctx, {
-  paginationOpts,
-  // one of:
-  secretId?,
-  namespace?,                     // omit for the default namespace
-  name?,                          // optionally narrows within `namespace`
-  type?: "created" | "updated" | "deleted" | "rotated",  // optionally narrows within `namespace`
-  order?,
-});
-```
-
-`secretId` cannot combine with `namespace`/`name`/`type`; `name` and `type`
-cannot combine with each other.
-
-### `rotate`
-
-```ts
-await secrets.rotate(ctx);
-// → { rotated, skipped, isDone }
-```
-
-Rewraps each stale secret's DEK onto the active KEK version, in batches of 100
-per transaction, **self-rescheduling** until the backlog drains. The secret
-plaintext is never rewritten. Safe to call repeatedly.
-
-The result stays exactly `{ rotated, skipped, isDone }`. `isDone` describes the
-returned batch. Use `isRotationComplete` to check completion, rather than a loop
-that calls `rotate` until `isDone` is true.
-
-`skipped` counts failed unwraps. Missing-key versions are orphans. The chain
-passes them and continues with configured versions. Orphan rows stay untouched.
-`await secrets.orphanKeyVersions(ctx)` reports their distinct versions in
-ascending order, using the same 100-version bound as `keyVersions`. Each batch
-logs one warning per orphan version found and one per failed unwrap, including
-continuations. Re-add the missing key or remove its rows. Call `rotate` again
-after key recovery if the chain has finished.
-
-### `isRotationComplete`
-
-```ts
-await secrets.isRotationComplete(ctx);
-// → boolean
-```
-
-`true` when every secret is on the active KEK version. Use this as the gate
-before retiring an old key.
-
-### `cleanupSecrets` / `cleanupEvents`
-
-```ts
-await secrets.cleanupSecrets(ctx, { retentionMs? });   // default 30 days
-await secrets.cleanupEvents(ctx, { retentionMs? });    // default 180 days
-```
-
-Hard-deletes expired secrets (and writes a `deleted` event with reason
-`expired_cleanup`) / old audit events. Self-reschedules; suitable for a
-recurring cron.
-
-## Expiry
-
-```
-expiresAt = now + ttlMs                 if ttlMs is a positive integer
-          = no expiry                   if ttlMs is null
-          = now + SECRET_STORE_DEFAULT_TTL_MS  if ttlMs is omitted and a default is set
-          = no expiry                   otherwise
-```
-
-`ttlMs` (and `SECRET_STORE_DEFAULT_TTL_MS`) must be a positive integer — `0`
-is rejected. Expiry is **recomputed on every `put`** (ADR 0003); use `update`
-to change expiry without rewriting the value.
-
-## Key rotation
-
-Rotation is a deploy-time exercise. The component drains in the background once
-triggered.
-
-1. **Deploy with a new key.** Add the new version to `defineApp({ env })` and
-   `defineKeys`, set the env var on the deployment, push:
-   ```ts
-   const app = defineApp({
-     env: {
-       MY_APP_KEK_V1: v.string(),
-       MY_APP_KEK_V2: v.string(),
-     },
-   });
-   app.use(secretStore, {
-     env: {
-       SECRET_STORE_KEYS: defineKeys({
-         1: process.env.MY_APP_KEK_V1!,
-         2: process.env.MY_APP_KEK_V2!,
-       }),
-     },
-   });
-   ```
    ```sh
-   npx convex env set MY_APP_KEK_V2 "$(openssl rand -base64 32)"
-   npx convex deploy
+   npm install convex-secret-store
    ```
-2. **Trigger rotation.** Call `secrets.rotate(ctx)` once (from the dashboard, a
-   one-shot internal mutation, or a temporary cron during the drain window).
-3. **Verify drain.** Poll `secrets.isRotationComplete(ctx)` — when `true`, no
-   secret is still on an old key.
-4. **Retire the old key.** First remove it from `defineApp({ env })` and
-   `defineKeys`, then push, then `npx convex env remove MY_APP_KEK_V1`. The
-   order matters — Convex refuses to remove a deployment env var that's still
-   declared as required in the app definition.
 
-A new `rotated` audit event is recorded per row.
+2. Mount the component in `convex/convex.config.ts` and pass it your keys.
 
-> **KEK material is immutable per version.** To rotate, *add* a new version
-> (`MY_APP_KEK_V2`) — never overwrite the material under an existing version
-> number. Replacing the bytes under `MY_APP_KEK_V1` while rows still reference
-> it is unsupported: reads of those rows will throw `decryption_failed`, and
-> `rotate` skips each failed unwrap and logs its secret name and key version,
-> including in scheduled batches. Warnings contain no key material or values.
-> Recovery requires restoring the original material under that version, or
-> `remove`-ing the affected rows.
+   ```ts
+   import { defineApp } from "convex/server";
+   import { v } from "convex/values";
+   import secretStore from "convex-secret-store/convex.config";
 
-## Cleanup crons
+   const app = defineApp({
+     env: { SECRET_STORE_KEYS: v.string() },
+   });
 
-Recommended permanent crons:
+   app.use(secretStore, {
+     env: { SECRET_STORE_KEYS: app.env.SECRET_STORE_KEYS },
+   });
 
-```ts
-// convex/cleanup.ts
-import { internalMutation } from "./_generated/server.js";
-import { secrets } from "./secrets.js";
+   export default app;
+   ```
 
-export const cleanupSecrets = internalMutation({
-  handler: (ctx) => secrets.cleanupSecrets(ctx),
-});
-export const cleanupEvents = internalMutation({
-  handler: (ctx) => secrets.cleanupEvents(ctx),
-});
-```
+3. Create a key and set it on your deployment. Each entry is `version:value`,
+   and the value is 32 random bytes in base64.
 
-```ts
-// convex/crons.ts
-import { cronJobs } from "convex/server";
-import { internal } from "./_generated/api.js";
+   ```sh
+   npx convex env set SECRET_STORE_KEYS "1:$(openssl rand -base64 32)"
+   npx convex dev
+   ```
 
-const crons = cronJobs();
-crons.interval("cleanup expired secrets", { hours: 24 }, internal.cleanup.cleanupSecrets);
-crons.interval("cleanup audit events", { hours: 24 }, internal.cleanup.cleanupEvents);
-export default crons;
-```
+   You should see `Convex functions ready!`. If the variable is missing, the
+   push stops and names the variable to set.
 
-If you'd rather skip the `cleanup.ts` wrapper, you can point `crons.interval`
-directly at the component's function and pass `retentionMs` as a static arg:
+4. Create the client once, in `convex/secrets.ts`.
 
-```ts
-import { components } from "./_generated/api.js";
+   ```ts
+   import { SecretStore } from "convex-secret-store";
+   import { components } from "./_generated/api.js";
 
-crons.interval(
-  "cleanup expired secrets",
-  { hours: 24 },
-  components.secretStore.cleanup.cleanupSecrets,
-  { retentionMs: 30 * 24 * 60 * 60 * 1000 },
-);
-```
+   export const secrets = new SecretStore(components.secretStore);
+   ```
 
-The wrapper above gets you cleaner names in logs and a place to hook in
-behavior later (metrics, alerts); the direct form trades that for one fewer
-file. Pick whichever your codebase prefers — both are supported.
+5. Save a secret and read it back, in `convex/demo.ts`.
 
-## Optional: rotation safety-net cron
+   ```ts
+   import { v } from "convex/values";
+   import { internalMutation, internalQuery } from "./_generated/server.js";
+   import { secrets } from "./secrets.js";
 
-By default the recommended rotation flow is one-shot — call
-`secrets.rotate(ctx)` once after deploying a new key, then poll
-`isRotationComplete()` before retiring the old one (see
-[Key rotation](#key-rotation)). If you'd rather not remember the manual step,
-add a slow rotation cron as a safety net. It's a no-op when nothing's stale
-(one indexed `.first()` probe per distinct key version) and picks up any
-backlog automatically:
+   export const save = internalMutation({
+     args: { value: v.string() },
+     handler: async (ctx, { value }) => {
+       await secrets.put(ctx, { namespace: "acme", name: "openai", value });
+     },
+   });
 
-```ts
-// convex/crons.ts (in addition to the cleanup crons above)
-import { components } from "./_generated/api.js";
+   export const check = internalQuery({
+     args: {},
+     handler: async (ctx) => {
+       const result = await secrets.get(ctx, {
+         namespace: "acme",
+         name: "openai",
+       });
+       return result.ok ? "found" : result.reason;
+     },
+   });
+   ```
 
-crons.interval(
-  "secret-store rotation",
-  { hours: 24 },
-  components.secretStore.lib.rotate,
-  {},
-);
-```
+   ```sh
+   npx convex run demo:save '{"value":"sk-test"}'
+   npx convex run demo:check
+   ```
 
-**Cadence caveat.** Keep the interval at **≥ 24h**. At sub-hourly cadence a
-cron tick may fire while a previous chain is still draining a large backlog,
-spawning parallel chains that repeat scans and waste compute. Transactions
-prevent duplicate rewraps. Daily or weekly is the right place.
+   The second command prints `"found"`. Before a public function passes a
+   namespace to `secrets`, check that the caller may use it. The
+   [security model](https://github.com/gaganref/convex-secret-store/blob/main/docs/security.md)
+   explains why.
 
-## Errors
+## Common questions
 
-Every backend failure surfaces as a `ConvexError` whose `data` carries a typed
-code:
+**I set `SECRET_STORE_KEYS` with `npx convex env set`, and the push still
+fails.**
 
-```ts
-import { isSecretStoreError, type SecretStoreErrorCode } from "convex-secret-store";
+The component reads the variable only through your app config. Declare it in
+`defineApp({ env })` and pass `app.env.SECRET_STORE_KEYS`, as in step 2.
 
-try {
-  await secrets.put(ctx, { name: "", value: "..." });
-} catch (error) {
-  if (isSecretStoreError(error)) {
-    switch (error.data.code) {
-      case "invalid_argument": /* … */ break;
-      case "value_too_large":  /* … */ break;
-      case "invalid_keys":     /* deployment misconfigured */ break;
-      case "key_unavailable":  /* row references a retired KEK */ break;
-      case "decryption_failed":/* tampering or corruption */ break;
-      case "not_found":        /* getOrThrow on a missing secret */ break;
-      case "expired":          /* getOrThrow on an expired secret */ break;
-    }
-  }
-}
-```
+**An older guide passes keys to
+`new SecretStore(components.secretStore, { keys })`.**
 
-## Security model
+That was the 0.1 API. Since 0.2, keys live in `SECRET_STORE_KEYS`, and the
+client takes only the component.
 
-`convex-secret-store` provides encryption at rest *inside Convex* — protecting
-against an attacker who gets the raw database without your deployment's
-configuration. It is **not** a hardware-backed key store and does not protect
-against any actor with deployment access:
+**How do I move to a new key?**
 
-- **KEKs live in the Convex deployment's env vars.** The component runs in your
-  Convex deployment; "encryption inside the component" and "encryption outside
-  the component" both run on Convex servers — there is no meaningful trust
-  boundary between them. Anyone who can read your Convex deployment env can
-  decrypt the data.
-- **Supply-chain trust.** A malicious version of this package, if installed,
-  could exfiltrate decrypted plaintext. Pin the dependency and review updates.
-- **AAD binding.** AES-256-GCM ciphertext binds `namespace`, `name`, and the
-  DEK's `keyVersion` as additional authenticated data, so ciphertext cannot be
-  relocated between rows.
-- **Plaintext metadata.** `metadata`, `namespace`, `name`, expiry, and audit
-  events are not encrypted. Do not store sensitive data in metadata.
-- **Your functions authorize, the component scopes.** The component trusts its
-  host app. Check that the caller may use a namespace before passing it to
-  `get`, `list`, or `listEvents`. Results never include rows outside the
-  namespace and filters you pass, whatever cursor the client sends.
-- **Errors carry no key material or secret values.** A `getOrThrow` error
-  names the secret you asked for, so treat secret names in errors like any
-  other data you choose to show a client.
-- **Audit events are advisory, not tamper-evident.** Events live in the same
-  database as the secrets and have no append-only enforcement; treat them as a
-  forensic trail visible to anyone with deployment access, not as evidence of
-  record.
+Add a new version and keep the old one, for example
+`npx convex env set SECRET_STORE_KEYS "1:<old>,2:<new>"`. New writes use the
+highest version right away. Call `secrets.rotate(ctx)` once, wait until
+`secrets.isRotationComplete(ctx)` returns `true`, then set the variable to the
+new key only. The
+[keys guide](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/keys.md)
+has the full steps.
 
-See `docs/adr/0001-component-side-encryption.md` for the architecture trade-off.
+**What happens if I remove a key that secrets still use?**
 
-## Example app
+Those secrets read as `key_unavailable`, and rotation leaves them alone.
+`secrets.orphanKeyVersions(ctx)` lists the missing versions. Add the key back,
+and the secrets read again.
 
-The [`example/`](./example) directory contains a small Vite + Convex app:
+**Can I read these secrets outside Convex?**
 
-- **Secrets** — store, replace, preview (masked), and remove environment
-  secrets
-- **Activity** — paginate the audit log
-- **Settings** — version counts per scope, rotation controls, cleanup buttons,
-  and demo data seeding
+Yes. `convex-secret-store/envelope` has the same encryption with no Convex
+dependency, so a Worker or a script can read and write compatible values. See
+[using it outside Convex](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/outside-convex.md).
 
-The example binds `SECRET_STORE_KEYS: app.env.SECRET_STORE_KEYS` by
-reference, so a key added with `npx convex env set SECRET_STORE_KEYS` takes
-effect without a push.
+**Are names and metadata encrypted?**
 
-> **Note:** The example UI is intentionally simple and unauthenticated. In a
-> real app, gate secret read/write flows behind your auth and authorization
-> layer before exposing them to operators.
+No. Only the value is encrypted. Names, namespaces, metadata, expiry times and
+audit events are stored as plain text, so keep sensitive data out of them.
+
+## How you know it's working
+
+- `secrets.get` returns `{ ok: true, value }` for a secret you saved.
+- In the Convex dashboard, the component's `secrets` table shows ciphertext,
+  never your value.
+- After a rotation, `secrets.isRotationComplete(ctx)` returns `true`.
+- A secret with a `ttlMs` shows as expired on an open page, without a reload.
+
+## Learn more
+
+- Guides:
+  [keys and rotation](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/keys.md),
+  [expiry](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/expiry.md),
+  [cleanup](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/cleanup.md),
+  [using it outside Convex](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/outside-convex.md)
+  and
+  [upgrading from 0.2](https://github.com/gaganref/convex-secret-store/blob/main/docs/guides/upgrading.md).
+- [Reference](https://github.com/gaganref/convex-secret-store/blob/main/docs/reference.md)
+  lists every function with its arguments, results and errors.
+- [Security model](https://github.com/gaganref/convex-secret-store/blob/main/docs/security.md)
+  covers what the encryption protects against and what it does not.
+- The
+  [example app](https://github.com/gaganref/convex-secret-store/tree/main/example)
+  shows paging, rotation and cleanup in a small Vite app.
+
+Found a bug, or want a feature?
+[Open an issue](https://github.com/gaganref/convex-secret-store/issues).
+
+<!-- END: Include on https://convex.dev/components -->
 
 ## Development
 
 ```sh
 npm install
-npm run dev          # backend + frontend together
-npm run build        # build the published package
+npm run dev
+npm run build
+npm test
 npm run typecheck
 npm run lint
-npm test
 ```
 
-Architectural decisions are recorded in [`docs/adr/`](./docs/adr).
-Domain terminology is in [`CONTEXT.md`](./CONTEXT.md).
-
-<!-- END: Include on https://convex.dev/components -->
+Design decisions are in [`docs/adr/`](./docs/adr), and domain terms are in
+[`CONTEXT.md`](./CONTEXT.md).

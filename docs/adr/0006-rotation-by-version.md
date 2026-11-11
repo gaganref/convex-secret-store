@@ -56,7 +56,8 @@ metrics determine the bytes available above an 8 MiB read reserve. The page uses
 half that budget through `maximumBytesRead`, since patching can read the secret
 again. The page limit can overshoot by one document. The reserve leaves room for
 that document, audit events, and the next distinct-version probe. When metrics
-are missing or throw, the same page cap uses a fixed 8 MiB budget.
+are missing or throw, the budget falls back to a fixed 8 MiB, so the page reads
+about 4 MiB, plus at most one more document.
 
 Both cleanups use async iteration, delete at most 100 rows, and check
 `bytesRead.remaining` after each deletion. They stop at the 8 MiB reserve and
