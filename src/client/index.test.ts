@@ -465,7 +465,7 @@ test("keyVersions reports versions in use through the facade", async () => {
   expect(await store.keyVersions(queryCtx)).toEqual([1]);
 });
 
-test("expiry arguments accept callers with and without deprecated now", () => {
+test("expiry arguments accept callers with and without now", () => {
   expectTypeOf<{ name: string }>().toExtend<GetArgs<string>>();
   expectTypeOf<{ name: string; now: number }>().toExtend<GetArgs<string>>();
   expectTypeOf<GetArgs<string>>()
@@ -477,24 +477,33 @@ test("expiry arguments accept callers with and without deprecated now", () => {
 });
 
 test.each(["get", "list"] as const)(
-  "%s does not send a clock argument to the component",
+  "%s sends the current time by default and preserves an explicit now",
   async (operation) => {
     const runQuery = vi.fn().mockResolvedValue(null);
     const secrets = new SecretStore(components.secretStore);
-    if (operation === "get") {
-      await secrets.get({ runQuery }, { name: "k", now: 0 });
-      expect(runQuery.mock.calls[0][1]).toEqual({
-        namespace: undefined,
-        name: "k",
-      });
-    } else {
-      const paginationOpts = { numItems: 10, cursor: null };
-      await secrets.list({ runQuery }, { paginationOpts, now: 0 });
-      expect(runQuery.mock.calls[0][1]).toEqual({
-        namespace: undefined,
-        paginationOpts,
-        order: undefined,
-      });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1234);
+    try {
+      for (const now of [undefined, 0]) {
+        if (operation === "get") {
+          await secrets.get({ runQuery }, { name: "k", now });
+          expect(runQuery.mock.lastCall?.[1]).toEqual({
+            namespace: undefined,
+            name: "k",
+            now: now ?? 1234,
+          });
+        } else {
+          const paginationOpts = { numItems: 10, cursor: null };
+          await secrets.list({ runQuery }, { paginationOpts, now });
+          expect(runQuery.mock.lastCall?.[1]).toEqual({
+            namespace: undefined,
+            paginationOpts,
+            order: undefined,
+            now: now ?? 1234,
+          });
+        }
+      }
+    } finally {
+      clock.mockRestore();
     }
   },
 );

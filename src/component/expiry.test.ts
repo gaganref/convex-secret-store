@@ -17,6 +17,7 @@ beforeEach(() => {
 afterEach(() => {
   resetKeyConfig();
   delete process.env.SECRET_STORE_KEYS;
+  delete process.env.SECRET_STORE_DEFAULT_TTL_MS;
   vi.useRealTimers();
 });
 
@@ -166,29 +167,74 @@ describe("scheduled expiry", () => {
     );
   });
 
-  test.each([undefined, 0, Number.MAX_SAFE_INTEGER])(
-    "get and list use the clock before the job runs and ignore now=%s",
-    async (now) => {
-      const t = initConvexTest();
-      const { secretId, expiresAt } = await t.mutation(api.lib.put, {
-        name: "clock",
-        value: "v",
-        ttlMs: 1000,
+  test("get and list use now for a legacy secret without an expiry job", async () => {
+    const t = initConvexTest();
+    const { secretId } = await t.mutation(api.lib.put, {
+      name: "legacy",
+      value: "v",
+    });
+    const expiresAt = Date.now() + 1000;
+    await t.run((ctx) => ctx.db.patch("secrets", secretId, { expiresAt }));
+    for (const now of [undefined, expiresAt - 1, expiresAt, expiresAt + 1]) {
+      const expired = now !== undefined && now >= expiresAt;
+      expect(await t.query(api.lib.get, { name: "legacy", now })).toMatchObject(
+        expired ? { ok: false, reason: "expired" } : { ok: true, value: "v" },
+      );
+      const result = await t.query(api.lib.list, {
+        paginationOpts: { numItems: 10, cursor: null },
+        now,
       });
-      const get = () => t.query(api.lib.get, { name: "clock", now });
-      const list = () =>
-        t.query(api.lib.list, {
-          paginationOpts: { numItems: 10, cursor: null },
-          now,
-        });
-      expect(await get()).toMatchObject({ ok: true, value: "v" });
-      expect((await list()).page[0].effectiveState).toBe("active");
-      vi.setSystemTime(expiresAt!);
-      expect(
-        (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiredAt,
-      ).toBeUndefined();
-      expect(await get()).toEqual({ ok: false, reason: "expired" });
-      expect((await list()).page[0].effectiveState).toBe("expired");
+      expect(result.page[0].effectiveState).toBe(
+        expired ? "expired" : "active",
+      );
+    }
+    vi.setSystemTime(expiresAt + 1000);
+    expect(await t.query(api.lib.get, { name: "legacy" })).toMatchObject({
+      ok: true,
+      value: "v",
+    });
+    const result = await t.query(api.lib.list, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page[0].effectiveState).toBe("active");
+  });
+
+  test.each(["put", "overwrite", "update", "default"] as const)(
+    "%s accepts far-future expiry without scheduling it and schedules nearer expiry",
+    async (operation) => {
+      const t = initConvexTest();
+      const year = 365 * 24 * 60 * 60 * 1000;
+      if (operation === "overwrite" || operation === "update") {
+        await t.mutation(api.lib.put, { name: "horizon", value: "v" });
+      }
+      for (const years of [6, 1]) {
+        const ttlMs = years * year;
+        if (operation === "default") {
+          process.env.SECRET_STORE_DEFAULT_TTL_MS = String(ttlMs);
+          resetKeyConfig();
+        }
+        const result =
+          operation === "update"
+            ? await t.mutation(api.lib.update, { name: "horizon", ttlMs })
+            : await t.mutation(api.lib.put, {
+                name: "horizon",
+                value: "v",
+                ...(operation === "default" ? {} : { ttlMs }),
+              });
+        expect(result).toMatchObject({ expiresAt: Date.now() + ttlMs });
+        const jobs = await t.run((ctx) =>
+          ctx.db.system.query("_scheduled_functions").collect(),
+        );
+        expect(jobs).toHaveLength(years === 6 ? 0 : 1);
+        if (years === 6) {
+          expect(
+            await t.query(api.lib.get, {
+              name: "horizon",
+              now: Date.now() + ttlMs,
+            }),
+          ).toEqual({ ok: false, reason: "expired" });
+        }
+      }
     },
   );
 
