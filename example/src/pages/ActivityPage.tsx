@@ -69,14 +69,18 @@ export function ActivityPage({
   }
 
   function describeEvent(event: (typeof filtered)[number]) {
-    if (event.metadata?.deletedReason) {
-      return `Deleted via ${String(event.metadata.deletedReason).replace(/_/g, " ")}`;
+    if (event.type === "deleted" && event.metadata?.reason) {
+      return `Deleted via ${String(event.metadata.reason).replace(/_/g, " ")}`;
     }
-    if (event.metadata?.previousKeyVersion) {
-      return `Rotated from v${event.metadata.previousKeyVersion} to v${event.metadata.newKeyVersion}`;
+    if (event.type === "rotated" && event.metadata?.fromVersion !== undefined) {
+      return `Rotated from v${event.metadata.fromVersion} to v${event.metadata.toVersion}`;
     }
     if (event.type === "created") return "Secret created";
-    if (event.type === "updated") return "Secret updated";
+    if (event.type === "updated") {
+      return event.metadata?.changed
+        ? `Updated ${event.metadata.changed.join(", ")}`
+        : "Secret updated";
+    }
     return "";
   }
 
