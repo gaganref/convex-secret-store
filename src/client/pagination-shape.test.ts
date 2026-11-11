@@ -6,6 +6,7 @@ import {
   makeFunctionReference,
   paginationOptsValidator,
   queryGeneric,
+  type PaginationOptions,
 } from "convex/server";
 import { v } from "convex/values";
 import { register } from "../test.js";
@@ -100,20 +101,23 @@ afterEach(() => {
 
 test.each(["list", "listEvents"] as const)(
   "%s keeps the v0.2.1 host result shape across pages",
-  async (name) => {
+  async (operation) => {
     const t = initLegacyHost();
     for (const name of ["first", "second", "third"]) {
       await t.mutation(components.secretStore.lib.put, { name, value: "v" });
     }
-    const query = makeFunctionReference<"query">(
-      `legacyPaginationHost:${name}`,
-    );
+    const query = makeFunctionReference<
+      "query",
+      { paginationOpts: PaginationOptions },
+      ListResult<Record<string, unknown>> | ListEventsResult
+    >(`legacyPaginationHost:${operation}`);
     let cursor: string | null = null;
     const names: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const result = await t.query(query, {
-        paginationOpts: { numItems: 1, cursor },
-      });
+      const result: ListResult<Record<string, unknown>> | ListEventsResult =
+        await t.query(query, {
+          paginationOpts: { numItems: 1, cursor },
+        });
       expect(Object.keys(result).sort()).toEqual([
         "continueCursor",
         "isDone",

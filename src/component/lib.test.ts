@@ -377,7 +377,7 @@ describe("native pagination", () => {
     );
   });
 
-  test("list preserves native read-budget split fields", async () => {
+  test("list respects native read budgets with the v0.2.1 result shape", async () => {
     const t = initConvexTest();
     for (const name of ["one", "two", "three", "four"]) {
       await t.mutation(api.lib.put, { name, value: "v" });
@@ -386,15 +386,28 @@ describe("native pagination", () => {
       now: Date.now(),
       paginationOpts: { numItems: 10, cursor: null, maximumRowsRead: 2 },
     });
-    expect(result).toMatchObject({
-      isDone: false,
-      pageStatus: "SplitRequired",
-      splitCursor: expect.any(String),
-    });
+    expect(Object.keys(result).sort()).toEqual([
+      "continueCursor",
+      "isDone",
+      "page",
+    ]);
+    expect(result.isDone).toBe(false);
     expect(result.page).toHaveLength(2);
+    const next = await t.query(api.lib.list, {
+      now: Date.now(),
+      paginationOpts: {
+        numItems: 10,
+        cursor: result.continueCursor,
+        maximumRowsRead: 2,
+      },
+    });
+    expect(next.page).toHaveLength(2);
+    expect(
+      new Set([...result.page, ...next.page].map((row) => row.secretId)).size,
+    ).toBe(4);
   });
 
-  test("listEvents preserves native read-budget split fields", async () => {
+  test("listEvents respects native read budgets with the v0.2.1 result shape", async () => {
     const t = initConvexTest();
     for (const name of ["one", "two", "three", "four"]) {
       await t.mutation(api.lib.put, { name, value: "v" });
@@ -402,12 +415,24 @@ describe("native pagination", () => {
     const result = await t.query(api.lib.listEvents, {
       paginationOpts: { numItems: 10, cursor: null, maximumRowsRead: 2 },
     });
-    expect(result).toMatchObject({
-      isDone: false,
-      pageStatus: "SplitRequired",
-      splitCursor: expect.any(String),
-    });
+    expect(Object.keys(result).sort()).toEqual([
+      "continueCursor",
+      "isDone",
+      "page",
+    ]);
+    expect(result.isDone).toBe(false);
     expect(result.page).toHaveLength(2);
+    const next = await t.query(api.lib.listEvents, {
+      paginationOpts: {
+        numItems: 10,
+        cursor: result.continueCursor,
+        maximumRowsRead: 2,
+      },
+    });
+    expect(next.page).toHaveLength(2);
+    expect(
+      new Set([...result.page, ...next.page].map((row) => row.eventId)).size,
+    ).toBe(4);
   });
 });
 

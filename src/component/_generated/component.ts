@@ -98,8 +98,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             secretId: string;
             updatedAt: number;
           }>;
-          pageStatus?: "SplitRecommended" | "SplitRequired" | null;
-          splitCursor?: string | null;
         },
         Name
       >;
@@ -133,8 +131,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             secretId: string;
             type: "created" | "updated" | "deleted" | "rotated";
           }>;
-          pageStatus?: "SplitRecommended" | "SplitRequired" | null;
-          splitCursor?: string | null;
         },
         Name
       >;

@@ -4,7 +4,6 @@ import type {
   FunctionReturnType,
   FunctionVisibility,
   PaginationOptions as NativePaginationOptions,
-  PaginationResult,
 } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component.js";
 import type { SecretEventType } from "../shared.js";
@@ -157,8 +156,11 @@ export type ListItem<Metadata extends Record<string, unknown>> = Omit<
 > & { metadata: Metadata | undefined };
 
 /** Result of `SecretStore.list`. */
-export type ListResult<Metadata extends Record<string, unknown>> =
-  PaginationResult<ListItem<Metadata>>;
+export type ListResult<Metadata extends Record<string, unknown>> = {
+  page: Array<ListItem<Metadata>>;
+  isDone: boolean;
+  continueCursor: string;
+};
 
 /** Result of `SecretStore.rotate`. */
 export type RotateResult = FunctionReturnType<ComponentApi["lib"]["rotate"]>;

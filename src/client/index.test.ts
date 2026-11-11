@@ -415,21 +415,18 @@ describe("SecretStore facade", () => {
   });
 });
 
-test("pagination types accept native options and preserve optional result fields", () => {
+test("pagination types accept native options with the v0.2.1 result fields", () => {
   expectTypeOf<PaginationOptions>().toEqualTypeOf<NativePaginationOptions>();
   expectTypeOf<ListResult<Record<string, unknown>>>().toExtend<
     PaginationResult<ListItem<Record<string, unknown>>>
   >();
-  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
-    "splitCursor",
-  );
-  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
-    "pageStatus",
-  );
+  expectTypeOf<keyof ListResult<Record<string, unknown>>>().toEqualTypeOf<
+    "page" | "isDone" | "continueCursor"
+  >();
 });
 
 test.each(["list", "listEvents"] as const)(
-  "%s forwards native options and split results",
+  "%s forwards native options and component pages",
   async (operation) => {
     const paginationOpts: PaginationOptions = {
       numItems: 10,
@@ -442,8 +439,6 @@ test.each(["list", "listEvents"] as const)(
       page: [],
       isDone: false,
       continueCursor: "end",
-      splitCursor: "middle",
-      pageStatus: "SplitRequired" as const,
     };
     const runQuery = vi.fn().mockResolvedValue(result);
     const store = new SecretStore(components.secretStore);
