@@ -462,3 +462,33 @@ test("keyVersions reports versions in use through the facade", async () => {
   await store.put(mutationCtx, { name: "one", value: "v" });
   expect(await store.keyVersions(queryCtx)).toEqual([1]);
 });
+
+test.each(["get", "list"] as const)(
+  "%s sends the current time to the component",
+  async (operation) => {
+    const runQuery = vi.fn().mockResolvedValue(null);
+    const secrets = new SecretStore(components.secretStore);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1234);
+    try {
+      if (operation === "get") {
+        await secrets.get({ runQuery }, { name: "k" });
+        expect(runQuery.mock.lastCall?.[1]).toEqual({
+          namespace: undefined,
+          name: "k",
+          now: 1234,
+        });
+      } else {
+        const paginationOpts = { numItems: 10, cursor: null };
+        await secrets.list({ runQuery }, { paginationOpts });
+        expect(runQuery.mock.lastCall?.[1]).toEqual({
+          namespace: undefined,
+          paginationOpts,
+          order: undefined,
+          now: 1234,
+        });
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);

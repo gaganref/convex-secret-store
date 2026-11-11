@@ -43,7 +43,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       get: FunctionReference<
         "query",
         "internal",
-        { name: string; namespace?: string; now: number },
+        { name: string; namespace?: string; now?: number },
         | {
             expiresAt?: number;
             metadata?: Record<string, any>;
@@ -73,7 +73,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           namespace?: string;
-          now: number;
+          now?: number;
           order?: "asc" | "desc";
           paginationOpts: {
             cursor: string | null;

@@ -1,10 +1,55 @@
 import { ConvexError, v } from "convex/values";
-import { internalMutation } from "./_generated/server.js";
+import { internalMutation, type MutationCtx } from "./_generated/server.js";
+import type { Id } from "./_generated/dataModel.js";
+import { internal } from "./_generated/api.js";
+
+// Stay one day inside Convex's five-year scheduling horizon.
+const MAX_EXPIRY_SCHEDULE_DELAY_MS = (5 * 365 - 1) * 24 * 60 * 60 * 1000;
+const HOST_SCHEDULING_RESERVE = 500;
+
+export async function scheduleExpiry(
+  ctx: MutationCtx,
+  secretId: Id<"secrets">,
+  expiresAt: number | undefined,
+  now: number,
+): Promise<void> {
+  if (
+    expiresAt === undefined ||
+    expiresAt - now > MAX_EXPIRY_SCHEDULE_DELAY_MS
+  ) {
+    return;
+  }
+  let remaining: number | undefined;
+  try {
+    remaining = (await ctx.meta.getTransactionMetrics()).functionsScheduled
+      .remaining;
+  } catch {
+    // Older test runtimes do not implement transaction metrics.
+  }
+  if (remaining !== undefined && remaining <= HOST_SCHEDULING_RESERVE) {
+    return;
+  }
+  await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
+    secretId,
+    expiresAt,
+  });
+}
 
 export const expire = internalMutation({
   args: { secretId: v.id("secrets"), expiresAt: v.number() },
   returns: v.null(),
-  handler: async () => null,
+  handler: async (ctx, args) => {
+    const secret = await ctx.db.get("secrets", args.secretId);
+    if (
+      secret === null ||
+      secret.expiresAt !== args.expiresAt ||
+      secret.expiredAt !== undefined
+    ) {
+      return null;
+    }
+    await ctx.db.patch("secrets", secret._id, { expiredAt: Date.now() });
+    return null;
+  },
 });
 
 /**
