@@ -99,7 +99,6 @@ export class SecretStore<
     return (await ctx.runQuery(this.component.lib.get, {
       namespace: args.namespace,
       name: args.name,
-      now: Date.now(),
     })) as GetResult<Metadata>;
   }
 
@@ -136,7 +135,6 @@ export class SecretStore<
       namespace: args.namespace,
       paginationOpts: args.paginationOpts,
       order: args.order,
-      now: Date.now(),
     })) as ListResult<Metadata>;
   }
 

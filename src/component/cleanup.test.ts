@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { Id } from "./_generated/dataModel.js";
 import { api } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
@@ -71,6 +72,74 @@ describe("component cleanup — secrets", () => {
       retentionMs: 1,
     });
     expect(result.deleted).toBe(0);
+  });
+
+  test("flags pre-upgrade secrets at expiry without deleting retained rows or adding events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const now = Date.now();
+    const t = initConvexTest();
+    const recent = await insertSecret(t, "recent", now - 1000);
+    const atExpiry = await insertSecret(t, "at-expiry", now);
+    const future = await insertSecret(t, "future", now + 1000);
+    const permanent = await insertSecret(t, "permanent", undefined);
+    const flagged = await insertSecret(t, "already-flagged", now - 2000);
+    await t.run((ctx) =>
+      ctx.db.patch("secrets", flagged, { expiredAt: now - 500 }),
+    );
+    const result = await t.mutation(api.cleanup.cleanupSecrets, {
+      retentionMs: DAY,
+    });
+    expect(result).toEqual({ deleted: 0, isDone: true });
+    const flags = await t.run(async (ctx) =>
+      Promise.all(
+        [recent, atExpiry, future, permanent, flagged].map(
+          async (id) => (await ctx.db.get("secrets", id))?.expiredAt ?? null,
+        ),
+      ),
+    );
+    expect(
+      flags.slice(0, 2).every((flag) => flag !== null && flag >= now),
+    ).toBe(true);
+    expect(flags.slice(2)).toEqual([null, null, now - 500]);
+    expect(
+      (
+        await t.query(api.lib.listEvents, {
+          paginationOpts: { numItems: 10, cursor: null },
+        })
+      ).page,
+    ).toEqual([]);
+  });
+
+  test("drains more than one batch of pre-upgrade rows past already-flagged rows", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const now = Date.now();
+    const t = initConvexTest();
+    const ids: Id<"secrets">[] = [];
+    for (let i = 0; i < 205; i++) {
+      ids.push(await insertSecret(t, `legacy-${i}`, now - 1000 + i));
+    }
+    await t.run(async (ctx) => {
+      for (const id of ids.slice(0, 100)) {
+        await ctx.db.patch("secrets", id, { expiredAt: now - 500 });
+      }
+    });
+    expect(
+      await t.mutation(api.cleanup.cleanupSecrets, { retentionMs: DAY }),
+    ).toEqual({ deleted: 0, isDone: false });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const flags = await t.run(async (ctx) =>
+      Promise.all(
+        ids.map(
+          async (id) => (await ctx.db.get("secrets", id))?.expiredAt ?? null,
+        ),
+      ),
+    );
+    expect(flags.slice(0, 100)).toEqual(Array<number>(100).fill(now - 500));
+    expect(flags.slice(100).every((flag) => flag !== null && flag >= now)).toBe(
+      true,
+    );
   });
 
   test("rejects a non-positive retentionMs", async () => {

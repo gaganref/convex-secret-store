@@ -1,6 +1,6 @@
 # Time-sensitive queries take `now` as an argument
 
-/ Status: accepted
+/ Status: superseded by [0005](0005-expiry-scheduled-flip.md)
 
 `get` and `list` evaluate secret expiry, which is time-relative. They take the
 current time as an explicit `now` argument — supplied by the client facade as

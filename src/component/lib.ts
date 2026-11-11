@@ -6,7 +6,7 @@ import {
 } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
-import { api } from "./_generated/api.js";
+import { api, internal } from "./_generated/api.js";
 import {
   effectiveStateValidator,
   metadataValidator,
@@ -87,8 +87,14 @@ async function findSecret(
     .unique();
 }
 
-function isExpired(secret: { expiresAt?: number }, now: number): boolean {
-  return secret.expiresAt !== undefined && now >= secret.expiresAt;
+function isExpired(secret: {
+  expiresAt?: number;
+  expiredAt?: number;
+}): boolean {
+  return (
+    secret.expiredAt !== undefined ||
+    (secret.expiresAt !== undefined && Date.now() >= secret.expiresAt)
+  );
 }
 
 /**
@@ -147,6 +153,12 @@ export const put = mutation({
         ...(expiresAt !== undefined ? { expiresAt } : {}),
         updatedAt: now,
       });
+      if (expiresAt !== undefined) {
+        await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
+          secretId,
+          expiresAt,
+        });
+      }
       await recordEvent(ctx, {
         secretId,
         namespace: args.namespace,
@@ -177,6 +189,12 @@ export const put = mutation({
       expiredAt: undefined,
       updatedAt: now,
     });
+    if (expiresAt !== undefined) {
+      await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
+        secretId: existing._id,
+        expiresAt,
+      });
+    }
     await recordEvent(ctx, {
       secretId: existing._id,
       namespace: args.namespace,
@@ -196,14 +214,16 @@ export const put = mutation({
 /**
  * Load and decrypt a secret value.
  *
- * Expiry is evaluated against the caller-supplied `now` (ADR 0004). Returns
- * `not_found`, `expired`, or `key_unavailable` when the secret is unusable.
+ * Scheduled expiry invalidates reactive queries (ADR 0005). The clock also
+ * rejects expired secrets before their job runs or an older row is swept.
+ * Returns `not_found`, `expired`, or `key_unavailable` when unusable.
  */
 export const get = query({
   args: {
     namespace: v.optional(v.string()),
     name: v.string(),
-    now: v.number(),
+    /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
+    now: v.optional(v.number()),
   },
   returns: v.union(
     v.object({
@@ -229,7 +249,7 @@ export const get = query({
     if (secret === null) {
       return { ok: false as const, reason: "not_found" as const };
     }
-    if (isExpired(secret, args.now)) {
+    if (isExpired(secret)) {
       return { ok: false as const, reason: "expired" as const };
     }
     if (!hasVersion(secret.keyVersion)) {
@@ -280,16 +300,16 @@ const listItemValidator = v.object({
 /**
  * Paginate secrets in a namespace, newest-updated first.
  *
- * Each row carries `effectiveState` (evaluated against the caller-supplied
- * `now`, per ADR 0004) so callers can distinguish active from expired secrets
- * without an extra query. The decrypted value is never included.
+ * Each row carries `effectiveState` from stored expiry state and the server
+ * clock (ADR 0005). The decrypted value is never included.
  */
 export const list = query({
   args: {
     namespace: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
     order: orderValidator,
-    now: v.number(),
+    /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
+    now: v.optional(v.number()),
   },
   returns: paginationResultValidator(listItemValidator),
   handler: async (ctx, args) => {
@@ -319,7 +339,7 @@ export const list = query({
         createdAt: secret._creationTime,
         updatedAt: secret.updatedAt,
         expiresAt: secret.expiresAt,
-        effectiveState: isExpired(secret, args.now)
+        effectiveState: isExpired(secret)
           ? ("expired" as const)
           : ("active" as const),
         keyVersion: secret.keyVersion,
@@ -387,6 +407,12 @@ export const update = mutation({
       changed.push("ttl");
     }
     await ctx.db.patch("secrets", secret._id, patch);
+    if (args.ttlMs !== undefined && nextExpiresAt !== undefined) {
+      await ctx.scheduler.runAt(nextExpiresAt, internal.expiry.expire, {
+        secretId: secret._id,
+        expiresAt: nextExpiresAt,
+      });
+    }
     await recordEvent(ctx, {
       secretId: secret._id,
       namespace: secret.namespace,

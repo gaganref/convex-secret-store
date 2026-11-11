@@ -4,7 +4,18 @@ import { internalMutation } from "./_generated/server.js";
 export const expire = internalMutation({
   args: { secretId: v.id("secrets"), expiresAt: v.number() },
   returns: v.null(),
-  handler: async () => null,
+  handler: async (ctx, args) => {
+    const secret = await ctx.db.get("secrets", args.secretId);
+    if (
+      secret === null ||
+      secret.expiresAt !== args.expiresAt ||
+      secret.expiredAt !== undefined
+    ) {
+      return null;
+    }
+    await ctx.db.patch("secrets", secret._id, { expiredAt: Date.now() });
+    return null;
+  },
 });
 
 /**
