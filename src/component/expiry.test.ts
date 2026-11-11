@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { put } from "./lib.js";
 import { resolveExpiresAt } from "./expiry.js";
 import { api, internal } from "./_generated/api.js";
 import { initConvexTest } from "./setup.test.js";
@@ -22,6 +23,171 @@ afterEach(() => {
 });
 
 describe("scheduled expiry", () => {
+  test("1001 expiring puts leave 500 scheduling slots for the host", async (context) => {
+    const t = initConvexTest();
+    try {
+      await t.run((ctx) => ctx.meta.getTransactionMetrics());
+    } catch {
+      context.skip(
+        "This convex-test version does not implement transaction metrics",
+      );
+    }
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 1001; i++) {
+        await ctx.runMutation(api.lib.put, {
+          name: `bulk-${i}`,
+          value: "v",
+          ttlMs: 3600000,
+        });
+      }
+      expect(
+        (await ctx.meta.getTransactionMetrics()).functionsScheduled,
+      ).toEqual({
+        used: 500,
+        remaining: 500,
+      });
+    });
+    expect(
+      await t.query(api.lib.get, {
+        name: "bulk-1000",
+        now: Date.now() + 3600000,
+      }),
+    ).toEqual({ ok: false, reason: "expired" });
+  });
+
+  test.each(["put", "overwrite", "update"] as const)(
+    "%s preserves the host reserve and resumes live expiry on a later rewrite",
+    async (operation, context) => {
+      const t = initConvexTest();
+      try {
+        await t.run((ctx) => ctx.meta.getTransactionMetrics());
+      } catch {
+        context.skip(
+          "This convex-test version does not implement transaction metrics",
+        );
+      }
+      const seed = await t.mutation(api.lib.put, { name: "seed", value: "v" });
+      if (operation !== "put") {
+        await t.mutation(api.lib.put, { name: "reserved", value: "v" });
+      }
+      await t.run(async (ctx) => {
+        for (let i = 0; i < 500; i++) {
+          await ctx.scheduler.runAt(
+            Date.now() + 3600000,
+            internal.expiry.expire,
+            {
+              secretId: seed.secretId,
+              expiresAt: Date.now() + 3600000,
+            },
+          );
+        }
+        if (operation === "update") {
+          await ctx.runMutation(api.lib.update, {
+            name: "reserved",
+            ttlMs: 1000,
+          });
+        } else {
+          await ctx.runMutation(api.lib.put, {
+            name: "reserved",
+            value: "v",
+            ttlMs: 1000,
+          });
+        }
+        expect(
+          (await ctx.meta.getTransactionMetrics()).functionsScheduled.remaining,
+        ).toBe(500);
+        for (let i = 0; i < 400; i++) {
+          await ctx.scheduler.runAt(
+            Date.now() + 3600000,
+            internal.expiry.expire,
+            {
+              secretId: seed.secretId,
+              expiresAt: Date.now() + 3600000,
+            },
+          );
+        }
+      });
+      vi.advanceTimersByTime(1000);
+      await t.finishInProgressScheduledFunctions();
+      expect(
+        await t.query(api.lib.get, { name: "reserved", now: Date.now() }),
+      ).toEqual({ ok: false, reason: "expired" });
+      expect(
+        (
+          await t.query(api.lib.list, {
+            paginationOpts: { numItems: 10, cursor: null },
+            now: Date.now(),
+          })
+        ).page.find((secret) => secret.name === "reserved")?.effectiveState,
+      ).toBe("expired");
+      const { secretId } = await t.mutation(api.lib.put, {
+        name: "reserved",
+        value: "new",
+        ttlMs: 1000,
+      });
+      vi.advanceTimersByTime(1000);
+      await t.finishInProgressScheduledFunctions();
+      expect(
+        (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiredAt,
+      ).toBe(Date.now());
+    },
+  );
+
+  test.each(["missing", "throwing"] as const)(
+    "expiry still schedules when transaction metrics are %s",
+    async (environment) => {
+      const t = initConvexTest();
+      const { secretId, expiresAt } = await t.run((ctx) => {
+        Object.defineProperty(ctx, "meta", {
+          value:
+            environment === "missing"
+              ? undefined
+              : {
+                  ...ctx.meta,
+                  getTransactionMetrics: async () => {
+                    throw new Error("unsupported metrics");
+                  },
+                },
+        });
+        return put._handler(ctx, { name: "fallback", value: "v", ttlMs: 1000 });
+      });
+      vi.advanceTimersByTime(1000);
+      await t.finishInProgressScheduledFunctions();
+      expect(
+        (await t.run((ctx) => ctx.db.get("secrets", secretId)))?.expiredAt,
+      ).toBe(expiresAt);
+    },
+  );
+
+  test("scheduler failures still reject the expiring write", async () => {
+    const t = initConvexTest();
+    await expect(
+      t.run((ctx) =>
+        put._handler(
+          {
+            ...ctx,
+            meta: {
+              ...ctx.meta,
+              getTransactionMetrics: async () => {
+                throw new Error("unsupported metrics");
+              },
+            },
+            scheduler: {
+              ...ctx.scheduler,
+              runAt: async () => {
+                throw new Error("scheduler failure");
+              },
+            },
+          },
+          { name: "failed", value: "v", ttlMs: 1000 },
+        ),
+      ),
+    ).rejects.toThrow("scheduler failure");
+    expect(
+      await t.query(api.lib.get, { name: "failed", now: Date.now() }),
+    ).toEqual({ ok: false, reason: "not_found" });
+  });
+
   test("put flips the stored secret at expiresAt without changing its audit history", async () => {
     const t = initConvexTest();
     const { secretId, expiresAt, updatedAt } = await t.mutation(api.lib.put, {
