@@ -9,8 +9,10 @@ stored rows no longer match the component schema.
 
 A patch release keeps every app working with no action from the host:
 
-- Public function names, arguments and return fields stay. Returns may gain
-  fields.
+- Public function names stay. Arguments only widen, with new optional fields.
+- Results keep exactly the same fields. Hosts often check them with strict
+  `returns` validators, so even a new optional field throws. New data goes in a
+  new function.
 - The schema only widens. Code reads old and new row shapes, so no correct
   answer depends on a migration having run.
 - Internal functions that scheduled jobs call (such as `expiry.expire`) keep
@@ -26,7 +28,12 @@ A breaking change ships in a minor release, in this order:
 3. The breaking minor, with a **Breaking** CHANGELOG entry and upgrade steps.
 
 The Convex peer range is `^1.39.0`. Raise it only in a minor, with a CHANGELOG
-note. CI runs the tests on the installed Convex and on 1.39.1.
+note.
+
+convex-test does not enforce several backend limits: the five-year scheduling
+horizon, 1000 scheduled functions per mutation, and bytes read before `.filter`.
+It also omits fields the real backend adds to results. Prove a change that
+touches any of these on a local backend.
 
 ## Decisions
 
