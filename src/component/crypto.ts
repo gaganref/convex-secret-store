@@ -76,6 +76,10 @@ export function buildDekAAD(
   );
 }
 
+/**
+ * Import one `SECRET_STORE_KEYS` entry's base64 value (32 random bytes) as an
+ * AES-256-GCM key encryption key (KEK).
+ */
 export async function importKey(rawKeyBase64: string): Promise<CryptoKey> {
   const bytes = decodeBase64(rawKeyBase64);
   if (bytes.byteLength !== 32) {
@@ -148,6 +152,16 @@ async function decryptRaw(params: {
   return new Uint8Array(plaintext);
 }
 
+/**
+ * Encrypt a value the way the component stores it: a fresh data key encrypts
+ * the value, and the KEK wraps the data key.
+ *
+ * `namespace` and `name` are bound into both ciphertexts, and `keyVersion`
+ * into the wrapped data key, so decryption needs the same three values. Pass
+ * `namespace: undefined` for a secret with no namespace; the component rejects
+ * an empty string. Store `keyVersion` next to the four returned fields. The
+ * component encrypts new values with the highest configured version.
+ */
 export async function encryptSecret(params: {
   value: string;
   namespace: string | undefined;
@@ -187,6 +201,11 @@ export async function encryptSecret(params: {
   };
 }
 
+/**
+ * Decrypt fields written by `encryptSecret` or by the component. Throws when
+ * the KEK, `keyVersion`, `namespace` or `name` differ from the ones used to
+ * encrypt.
+ */
 export async function decryptSecret(params: {
   encryptedValue: string;
   iv: string;
@@ -215,6 +234,11 @@ export async function decryptSecret(params: {
   return textDecoder.decode(plaintext);
 }
 
+/**
+ * Re-wrap a stored data key from one KEK version to another without touching
+ * the encrypted value. Store the returned `wrappedDEK` and `dekIv` with
+ * `toVersion` as the row's new `keyVersion`.
+ */
 export async function rewrapDEK(params: {
   wrappedDEK: string;
   dekIv: string;
