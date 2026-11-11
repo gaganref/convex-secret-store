@@ -2,27 +2,25 @@ import { defineComponent } from "convex/server";
 import { v } from "convex/values";
 
 /**
- * The secret store component.
- *
- * Declares the environment variables it requires. A host app supplies them at
- * mount time — `SECRET_STORE_KEYS` is required, so omitting it is a
- * compile-time error:
+ * The secret store requires `SECRET_STORE_KEYS` at mount time.
+ * Declare it on the app and bind `app.env.SECRET_STORE_KEYS` so changes through
+ * `npx convex env set SECRET_STORE_KEYS` take effect without a code push.
+ * The typed alternative, `defineKeys({ 1: process.env.KEK_V1! })` from the
+ * package's main entry, validates and serializes values fixed at push time.
  *
  * ```ts
+ * import { defineApp } from "convex/server";
+ * import { v } from "convex/values";
  * import secretStore from "convex-secret-store/convex.config";
- * import { defineKeys } from "convex-secret-store";
  *
+ * const app = defineApp({ env: { SECRET_STORE_KEYS: v.string() } });
  * app.use(secretStore, {
  *   env: {
- *     SECRET_STORE_KEYS: defineKeys({
- *       1: process.env.KEK_V1!,
- *     }),
+ *     SECRET_STORE_KEYS: app.env.SECRET_STORE_KEYS,
  *   },
  * });
+ * export default app;
  * ```
- *
- * Note: a component's `convex.config.ts` may export only the `defineComponent`
- * result. `defineKeys` is therefore exported from the package's main entry.
  */
 export default defineComponent("secretStore", {
   env: {

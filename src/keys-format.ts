@@ -98,10 +98,13 @@ export function validateKeyEntries(keys: readonly KeyEntry[]): void {
 }
 
 /**
- * Validate `keys` and serialize them into the delimited string stored in the
- * `SECRET_STORE_KEYS` environment variable. Duplicate version numbers are
- * caught by TypeScript at the call site (object literals reject duplicate
- * keys); other constraints are enforced at runtime.
+ * Validate the typed key map and serialize it as comma-separated `version:value`
+ * entries for `SECRET_STORE_KEYS`.
+ * In a host config, `defineKeys({ 1: process.env.KEK_V1! })` fixes values at push
+ * time, so changing those values requires another push.
+ * For live updates through `npx convex env set SECRET_STORE_KEYS`, declare the
+ * variable with `defineApp({ env })` and bind `app.env.SECRET_STORE_KEYS` directly
+ * to the component instead.
  *
  * ```ts
  * app.use(secretStore, {
@@ -113,9 +116,6 @@ export function validateKeyEntries(keys: readonly KeyEntry[]): void {
  *   },
  * });
  * ```
- *
- * Operators who prefer to skip the helper can set the env var directly:
- * `convex env set SECRET_STORE_KEYS "1:AQEB…,2:AgIC…"`.
  */
 export function defineKeys(keys: Record<number, string>): string {
   const entries: KeyEntry[] = Object.entries(keys).map(([k, value], index) => {
