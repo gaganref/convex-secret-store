@@ -1,18 +1,22 @@
 import { v } from "convex/values";
-import { internalMutation, type MutationCtx } from "./_generated/server.js";
+import {
+  env,
+  internalMutation,
+  type MutationCtx,
+} from "./_generated/server.js";
 import { internal } from "./_generated/api.js";
 import { activeVersion, getKEK, hasVersion } from "./keys.js";
 import { rewrapDEK } from "./crypto.js";
 import { recordEvent } from "./events.js";
+import { parseKeyEntries } from "../keys-format.js";
 
 const BATCH_SIZE = 100;
 const READ_RESERVE = 8 * 1024 * 1024;
 
-export const rotationResultValidator = v.object({
+const rotationResultValidator = v.object({
   rotated: v.number(),
   skipped: v.number(),
   isDone: v.boolean(),
-  orphanVersions: v.optional(v.array(v.number())),
 });
 
 const positionValidator = v.union(
@@ -39,23 +43,38 @@ async function readBudget(ctx: MutationCtx): Promise<number> {
   }
 }
 
+function warnOrphanVersion(version: number): void {
+  console.warn(
+    `secret-store: keyVersion ${version} is not configured. ` +
+      `Its rows are left untouched until the key is re-added or the rows are removed.`,
+  );
+}
+
 /** One native page preserves the full index position, including tied timestamps. */
 export async function rotateBatch(
   ctx: MutationCtx,
   position: Position = { kind: "scan" },
   expectedActive = activeVersion(),
+  expectedVersions?: string,
 ) {
   const active = activeVersion();
-  if (expectedActive !== active) position = { kind: "scan" };
+  const configuredVersions = parseKeyEntries(env.SECRET_STORE_KEYS)
+    .map(({ version }) => version)
+    .sort((a, b) => a - b)
+    .join(",");
+  // Older queued jobs have no fingerprint, so they also restart safely.
+  if (expectedActive !== active || expectedVersions !== configuredVersions) {
+    position = { kind: "scan" };
+  }
   let rotated = 0;
   let skipped = 0;
-  const orphanVersions: number[] = [];
   let scanned = 0;
 
   async function finish(next: Position | null) {
     if (next !== null) {
       await ctx.scheduler.runAfter(0, internal.rotation.continueRotation, {
         active,
+        configuredVersions,
         position: next,
       });
     }
@@ -63,7 +82,6 @@ export async function rotateBatch(
       rotated,
       skipped,
       isDone: next === null,
-      ...(orphanVersions.length > 0 ? { orphanVersions } : {}),
     };
   }
 
@@ -83,7 +101,7 @@ export async function rotateBatch(
     position = { kind: "scan", afterVersion: version };
     if (version === active) continue;
     if (!hasVersion(version)) {
-      orphanVersions.push(version);
+      warnOrphanVersion(version);
       continue;
     }
     position = { kind: "rotate", version, cursor: null };
@@ -91,7 +109,7 @@ export async function rotateBatch(
 
   // A key may be removed between scheduled batches. Skip its entire range.
   if (!hasVersion(position.version) || position.version === active) {
-    if (!hasVersion(position.version)) orphanVersions.push(position.version);
+    if (!hasVersion(position.version)) warnOrphanVersion(position.version);
     return await finish({ kind: "scan", afterVersion: position.version });
   }
   const budget = await readBudget(ctx);
@@ -122,6 +140,10 @@ export async function rotateBatch(
         toKek,
       });
     } catch {
+      console.warn(
+        `secret-store: cannot rotate secret "${secret.name}": rewrap under keyVersion ${version} failed. ` +
+          `KEK material for that version may have been replaced.`,
+      );
       skipped++;
       continue;
     }
@@ -158,7 +180,7 @@ export async function rotateBatch(
     afterVersion = next.keyVersion;
     if (afterVersion === active) continue;
     if (!hasVersion(afterVersion)) {
-      orphanVersions.push(afterVersion);
+      warnOrphanVersion(afterVersion);
       continue;
     }
     return await finish({
@@ -171,8 +193,12 @@ export async function rotateBatch(
 }
 
 export const continueRotation = internalMutation({
-  args: { active: v.number(), position: positionValidator },
+  args: {
+    active: v.number(),
+    configuredVersions: v.optional(v.string()),
+    position: positionValidator,
+  },
   returns: rotationResultValidator,
   handler: async (ctx, args) =>
-    await rotateBatch(ctx, args.position, args.active),
+    await rotateBatch(ctx, args.position, args.active, args.configuredVersions),
 });

@@ -17,7 +17,7 @@ import { activeVersion, defaultTtlMs, getKEK, hasVersion } from "./keys.js";
 import { resolveExpiresAt, scheduleExpiry } from "./expiry.js";
 import { recordEvent } from "./events.js";
 import { eventMatchesFilter } from "./filters.js";
-import { rotateBatch, rotationResultValidator } from "./rotation.js";
+import { rotateBatch } from "./rotation.js";
 
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
@@ -554,38 +554,52 @@ export const listEvents = query({
   },
 });
 
+async function keyVersionsInUse(ctx: QueryCtx): Promise<number[]> {
+  const versions: number[] = [];
+  let secret = await ctx.db
+    .query("secrets")
+    .withIndex("by_key_version")
+    .first();
+  while (secret !== null) {
+    if (versions.length === 100) {
+      throw new ConvexError({
+        code: "invalid_argument",
+        message: "store exceeds 100 distinct key versions",
+      });
+    }
+    const version = secret.keyVersion;
+    versions.push(version);
+    secret = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version", (q) => q.gt("keyVersion", version))
+      .first();
+  }
+  return versions;
+}
+
 /** Distinct key versions in use across the mounted store, in ascending order. */
 export const keyVersions = query({
   args: {},
   returns: v.array(v.number()),
-  handler: async (ctx) => {
-    const versions: number[] = [];
-    let secret = await ctx.db
-      .query("secrets")
-      .withIndex("by_key_version")
-      .first();
-    while (secret !== null) {
-      if (versions.length === 100) {
-        throw new ConvexError({
-          code: "invalid_argument",
-          message: "store exceeds 100 distinct key versions",
-        });
-      }
-      const version = secret.keyVersion;
-      versions.push(version);
-      secret = await ctx.db
-        .query("secrets")
-        .withIndex("by_key_version", (q) => q.gt("keyVersion", version))
-        .first();
-    }
-    return versions;
-  },
+  handler: keyVersionsInUse,
+});
+
+/** Key versions in use whose KEKs are not configured, in ascending order. */
+export const orphanKeyVersions = query({
+  args: {},
+  returns: v.array(v.number()),
+  handler: async (ctx) =>
+    (await keyVersionsInUse(ctx)).filter((version) => !hasVersion(version)),
 });
 
 /** Rewrap secrets by key version, then continue in bounded internal batches. */
 export const rotate = mutation({
   args: {},
-  returns: rotationResultValidator,
+  returns: v.object({
+    rotated: v.number(),
+    skipped: v.number(),
+    isDone: v.boolean(),
+  }),
   handler: async (ctx) => await rotateBatch(ctx),
 });
 

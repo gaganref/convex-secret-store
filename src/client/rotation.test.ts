@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, expectTypeOf, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import {
   defineSchema,
@@ -8,8 +8,8 @@ import {
 } from "convex/server";
 import { v } from "convex/values";
 import component from "../test.js";
-import { SecretStore } from "./index.js";
-import { components } from "./setup.test.js";
+import { SecretStore, type RotateResult } from "./index.js";
+import { components, initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
 import { resetKeyConfig } from "../component/keys.js";
 
@@ -69,4 +69,41 @@ test("rotate satisfies a host's exact v0.2.1 returns validator with orphans", as
   expect(await t.query(components.secretStore.lib.keyVersions, {})).toEqual([
     1, 3,
   ]);
+});
+
+test("orphanKeyVersions reports distinct missing versions through the facade", async () => {
+  const t = initConvexTest();
+  const orphanKeyVersions = () =>
+    t.query((ctx) => secrets.orphanKeyVersions(ctx));
+  expect(await orphanKeyVersions()).toEqual([]);
+  await t.mutation(components.secretStore.lib.put, {
+    name: "first",
+    value: "v",
+  });
+  await t.mutation(components.secretStore.lib.put, {
+    name: "second",
+    value: "v",
+  });
+  process.env.SECRET_STORE_KEYS = defineKeys({ 3: V3 });
+  await t.mutation(components.secretStore.lib.put, {
+    name: "higher",
+    value: "v",
+  });
+  process.env.SECRET_STORE_KEYS = defineKeys({ 2: V2 });
+  await t.mutation(components.secretStore.lib.put, {
+    name: "active",
+    value: "v",
+  });
+  expect(await orphanKeyVersions()).toEqual([1, 3]);
+  expect(await t.query((ctx) => secrets.keyVersions(ctx))).toEqual([1, 2, 3]);
+  process.env.SECRET_STORE_KEYS = defineKeys({ 1: V1, 2: V2, 3: V3 });
+  expect(await orphanKeyVersions()).toEqual([]);
+});
+
+test("RotateResult has exactly the v0.2.1 fields", () => {
+  expectTypeOf<RotateResult>().toEqualTypeOf<{
+    rotated: number;
+    skipped: number;
+    isDone: boolean;
+  }>();
 });

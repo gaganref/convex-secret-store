@@ -281,11 +281,17 @@ Rewraps each stale secret's DEK onto the active KEK version, in batches of 100
 per transaction, **self-rescheduling** until the backlog drains. The secret
 plaintext is never rewritten. Safe to call repeatedly.
 
-`skipped` counts rows that reference a `keyVersion` no longer in
-`SECRET_STORE_KEYS` — orphans from retiring a KEK too soon. They're left
-untouched and logged. The chain stops rescheduling once only orphans remain
-(otherwise it would spin); recover by re-adding the missing KEK and calling
-`rotate` again, or by `remove`ing the orphan rows.
+The result stays exactly `{ rotated, skipped, isDone }`. `isDone` describes the
+returned batch. Use `isRotationComplete` to check completion, rather than a loop
+that calls `rotate` until `isDone` is true.
+
+`skipped` counts failed unwraps. Missing-key versions are orphans. The chain
+passes them and continues with configured versions. Orphan rows stay untouched.
+`await secrets.orphanKeyVersions(ctx)` reports their distinct versions in
+ascending order, using the same 100-version bound as `keyVersions`. Each batch
+logs one warning per orphan version found and one per failed unwrap, including
+continuations. Re-add the missing key or remove its rows. Call `rotate` again
+after key recovery if the chain has finished.
 
 ### `isRotationComplete`
 
@@ -363,8 +369,10 @@ A new `rotated` audit event is recorded per row.
 > (`MY_APP_KEK_V2`) — never overwrite the material under an existing version
 > number. Replacing the bytes under `MY_APP_KEK_V1` while rows still reference
 > it is unsupported: reads of those rows will throw `decryption_failed`, and
-> `rotate` will skip them with a warning. Recovery requires restoring the
-> original material under that version, or `remove`-ing the affected rows.
+> `rotate` skips each failed unwrap and logs its secret name and key version,
+> including in scheduled batches. Warnings contain no key material or values.
+> Recovery requires restoring the original material under that version, or
+> `remove`-ing the affected rows.
 
 ## Cleanup crons
 
@@ -435,8 +443,8 @@ crons.interval(
 
 **Cadence caveat.** Keep the interval at **≥ 24h**. At sub-hourly cadence a
 cron tick may fire while a previous chain is still draining a large backlog,
-spawning parallel chains that waste compute (no correctness issue, since the
-slice is self-consuming, just noise). Daily or weekly is the right place.
+spawning parallel chains that repeat scans and waste compute. Transactions
+prevent duplicate rewraps. Daily or weekly is the right place.
 
 ## Errors
 
