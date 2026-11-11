@@ -52,7 +52,8 @@ three breaking changes and how to roll back to 0.2.1.
   `returns` validators in host code keep passing. `get` and `list` on the
   component accept an optional `now`. The client still passes `Date.now()`.
 - The schema is unchanged, and there is no migration to run. Secrets written by
-  0.2.x read correctly, and each gets live expiry at its next write.
+  0.2.x read correctly. Each gets live expiry at its next `put`, or its next
+  `update` that sets `ttlMs`.
 - A page cursor from 0.2.x restarts at the first page, with no error.
 - `convex-helpers` is no longer a dependency, so the peer warning from 0.2.1 is
   gone. The `convex` peer range stays `^1.39.0`.
