@@ -15,9 +15,16 @@ Version 0.2.1 prepared a rollback bridge. Its schema accepts optional
 
 ## Decision
 
-`put` schedules `internal.expiry.expire` at every `expiresAt` it writes.
-`update` schedules it when a supplied `ttlMs` sets a new expiry. Metadata-only
-updates keep the existing expiry and job. Removing expiry schedules nothing.
+This decision adds the scheduled flip. [ADR 0004](0004-now-as-query-argument.md)
+still supplies the read-time check.
+
+`put` schedules `internal.expiry.expire` when the expiry it writes is within
+five years minus one day. `update` schedules it when a supplied `ttlMs` sets a
+new expiry within that horizon. Convex rejects jobs more than five years ahead.
+The one-day margin keeps scheduling inside that limit. Far-future expiries
+remain valid, including those from `SECRET_STORE_DEFAULT_TTL_MS`, but get no
+job. Metadata-only updates keep the existing expiry and job. Removing expiry
+schedules nothing.
 
 The job accepts exactly `{ secretId: v.id("secrets"), expiresAt: v.number() }`.
 It reads the secret and returns without a write if the secret is absent, its
@@ -26,18 +33,29 @@ It reads the secret and returns without a write if the secret is absent, its
 cancellation. A stale job after an overwrite, a TTL change, a TTL removal, or a
 deletion is harmless. Repeated jobs preserve the first flag.
 
-`get` and `list` report expiry when `expiredAt` is set or the server clock is at
-or past `expiresAt`. The flag invalidates subscribed queries. The clock check
-rejects expired secrets before a delayed job runs and for older rows without a
-job. `now` remains optional, accepted, ignored, and deprecated. The facade stops
-sending it.
+`get` and `list` report expiry when `expiredAt` is set, or when the supplied
+`now` is at or past `expiresAt`. The component accepts optional `now`, widened
+from the required argument in 0.2.1. Without `now`, only the flag determines
+expiry. Component queries never read the wall clock. The facade keeps passing
+`now: Date.now()` as in 0.2.1. `now` is not deprecated.
 
-`cleanupSecrets` also flags past-expiry secrets without `expiredAt`, using the
-existing `by_expires_at` index. It keeps its arguments and return fields,
-deletes up to 100 secrets past retention, flags up to 100 remaining secrets, and
-reschedules itself while either batch is full. Reads do not require the sweep to
-have run. Existing subscriptions to older rows refresh when the sweep flags
-them. Older rows with future expiry need a later sweep or a new write.
+The flag invalidates subscribed queries. The read-time check rejects expired
+secrets before a delayed job runs, for older rows without a job, and for
+far-future expiries. Both checks are needed. The local cache repro showed that
+removing `now` let a fresh host action return expired plaintext from a cached
+component query for a row with no job. The 0.2.1 facade returned `expired` for
+the same row because it supplied a new `now`.
+
+`cleanupSecrets` keeps its 0.2.1 deletion body and return shape. It does not
+scan or flag retained secrets. A trial pass that filtered unflagged secrets
+after scanning the expiry index exceeded read limits on retained,
+already-flagged secrets and rolled back cleanup deletions. Removing that pass
+preserves cleanup behavior without a new index or migration.
+
+Rows written by older versions stay correct through `now`. They gain a live flip
+only after a rewrite that schedules an expiry job, either a `put` or an `update`
+with a new TTL within the scheduling horizon. Metadata-only updates and cleanup
+do not add jobs to old rows.
 
 ## Rollback to 0.2.1
 
@@ -61,12 +79,13 @@ Cleanup deletions keep their existing `deleted` event with `expired_cleanup`.
 
 ## Consequences
 
-New expiring writes cost one scheduled mutation. Old jobs may still run after a
-TTL changes, but their checks prevent them from changing the current secret. The
-flip changes neither `updatedAt` nor the secret's audit history.
+Expiring writes within the scheduling horizon cost one scheduled mutation. Old
+jobs may still run after a TTL changes, but their checks prevent them from
+changing the current secret. The flip changes neither `updatedAt` nor the
+secret's audit history.
 
 Subscribed host queries refresh when the expiry mutation commits, so scheduler
-delay can postpone the visible flip. The clock check protects a query when it
-runs, but cannot itself invalidate a cached query. The sweep restores reactive
-expiry for past-expiry rows written by older versions. With no new index, its
-filter may scan already-flagged rows to find the next batch.
+delay can postpone the visible flip. Passing `now` protects each read when it
+runs, but time alone does not invalidate a subscribed query. Rows without a job
+need a new read to reflect elapsed time. Correct reads do not depend on cleanup
+or a migration having run.

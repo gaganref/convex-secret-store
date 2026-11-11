@@ -492,7 +492,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
   resetKeyConfig();
   delete process.env.SECRET_STORE_KEYS;
@@ -650,14 +649,12 @@ describe("component lib — put, get, has", () => {
     }
   });
 
-  test("get returns expired once the server clock passes expiresAt", async () => {
-    vi.useFakeTimers();
+  test("get returns expired once now passes expiresAt", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.put, { name: "short", value: "v", ttlMs: 1_000 });
-    vi.setSystemTime(Date.now() + 10_000_000);
     const result = await t.query(api.lib.get, {
       name: "short",
-      now: Date.now(),
+      now: Date.now() + 10_000_000,
     });
     expect(result).toEqual({ ok: false, reason: "expired" });
   });
@@ -1057,7 +1054,6 @@ describe("component lib — list", () => {
   });
 
   test("list reports effectiveState per row", async () => {
-    vi.useFakeTimers();
     const t = initConvexTest();
     await t.mutation(api.lib.put, {
       namespace: "a:prod",
@@ -1070,11 +1066,10 @@ describe("component lib — list", () => {
       value: "v",
       ttlMs: 1_000,
     });
-    vi.setSystemTime(Date.now() + 10_000_000);
     const result = await t.query(api.lib.list, {
       namespace: "a:prod",
       paginationOpts: { numItems: 10, cursor: null },
-      now: Date.now(),
+      now: Date.now() + 10_000_000,
     });
     const states = Object.fromEntries(
       result.page.map((secret) => [secret.name, secret.effectiveState]),

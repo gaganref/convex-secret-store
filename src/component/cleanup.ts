@@ -21,22 +21,19 @@ function assertPositiveRetention(retentionMs: number): void {
 }
 
 /**
- * Flag expired secrets and hard-delete those older than `retentionMs`.
+ * Hard-delete expired secrets whose expiry is older than `retentionMs`.
  *
- * The flag also invalidates reactive queries for secrets written before
- * scheduled expiry. It adds no audit event (ADR 0005).
- * Deletes up to 100 secrets and flags up to 100 more per transaction, then
- * reschedules itself while a backlog remains. Records a `deleted` audit event
- * with reason `expired_cleanup` before each deletion. Secrets with no expiry
- * are never deleted.
+ * Processes up to 100 rows per transaction and reschedules itself while a
+ * backlog remains. Records a `deleted` audit event with reason
+ * `expired_cleanup` before each deletion. Secrets with no expiry are never
+ * deleted.
  */
 export const cleanupSecrets = mutation({
   args: { retentionMs: v.number() },
   returns: cleanupResultValidator,
   handler: async (ctx, args) => {
     assertPositiveRetention(args.retentionMs);
-    const now = Date.now();
-    const cutoff = now - args.retentionMs;
+    const cutoff = Date.now() - args.retentionMs;
     const expired = await ctx.db
       .query("secrets")
       .withIndex("by_expires_at", (q) =>
@@ -55,21 +52,7 @@ export const cleanupSecrets = mutation({
       await ctx.db.delete("secrets", secret._id);
     }
 
-    const unflagged = await ctx.db
-      .query("secrets")
-      .withIndex("by_expires_at", (q) =>
-        q.gt("expiresAt", undefined).lte("expiresAt", now),
-      )
-      // eslint-disable-next-line @convex-dev/no-filter-in-query -- Rollback keeps the existing index.
-      .filter((q) => q.eq(q.field("expiredAt"), undefined))
-      .take(CLEANUP_BATCH_SIZE);
-    for (const secret of unflagged) {
-      await ctx.db.patch("secrets", secret._id, { expiredAt: now });
-    }
-
-    const isDone =
-      expired.length < CLEANUP_BATCH_SIZE &&
-      unflagged.length < CLEANUP_BATCH_SIZE;
+    const isDone = expired.length < CLEANUP_BATCH_SIZE;
     if (!isDone) {
       await ctx.scheduler.runAfter(0, api.cleanup.cleanupSecrets, {
         retentionMs: args.retentionMs,

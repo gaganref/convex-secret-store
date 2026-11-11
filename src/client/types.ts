@@ -51,8 +51,6 @@ export type PutResult = PutComponentResult;
 export type GetArgs<Namespace extends string> = {
   namespace?: Namespace;
   name: string;
-  /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
-  now?: number;
 };
 
 /** The decrypted payload of a successful read. */
@@ -148,8 +146,6 @@ export type ListArgs<Namespace extends string> = {
   namespace?: Namespace;
   paginationOpts: PaginationOptions;
   order?: "asc" | "desc";
-  /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
-  now?: number;
 };
 
 type RawListResult = FunctionReturnType<ComponentApi["lib"]["list"]>;

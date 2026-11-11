@@ -221,7 +221,11 @@ describe("scheduled expiry", () => {
                 value: "v",
                 ...(operation === "default" ? {} : { ttlMs }),
               });
-        expect(result).toMatchObject({ expiresAt: Date.now() + ttlMs });
+        expect(result).toMatchObject({ expiresAt: expect.any(Number) });
+        if (!("expiresAt" in result) || result.expiresAt === undefined) {
+          throw new Error("write did not return an expiry");
+        }
+        expect(result.expiresAt).toBe(result.updatedAt! + ttlMs);
         const jobs = await t.run((ctx) =>
           ctx.db.system.query("_scheduled_functions").collect(),
         );
@@ -230,7 +234,7 @@ describe("scheduled expiry", () => {
           expect(
             await t.query(api.lib.get, {
               name: "horizon",
-              now: Date.now() + ttlMs,
+              now: result.expiresAt,
             }),
           ).toEqual({ ok: false, reason: "expired" });
         }

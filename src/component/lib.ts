@@ -23,6 +23,9 @@ import { eventMatchesFilter } from "./filters.js";
 const MAX_VALUE_BYTES = 64 * 1024;
 const byteCounter = new TextEncoder();
 
+// Stay one day inside Convex's five-year scheduling horizon.
+const MAX_EXPIRY_SCHEDULE_DELAY_MS = (5 * 365 - 1) * 24 * 60 * 60 * 1000;
+
 function isLegacyCursor(cursor: string | null | undefined): boolean {
   if (!cursor?.startsWith("[")) return false;
   try {
@@ -87,13 +90,15 @@ async function findSecret(
     .unique();
 }
 
-function isExpired(secret: {
-  expiresAt?: number;
-  expiredAt?: number;
-}): boolean {
+function isExpired(
+  secret: { expiresAt?: number; expiredAt?: number },
+  now: number | undefined,
+): boolean {
   return (
     secret.expiredAt !== undefined ||
-    (secret.expiresAt !== undefined && Date.now() >= secret.expiresAt)
+    (now !== undefined &&
+      secret.expiresAt !== undefined &&
+      now >= secret.expiresAt)
   );
 }
 
@@ -153,7 +158,10 @@ export const put = mutation({
         ...(expiresAt !== undefined ? { expiresAt } : {}),
         updatedAt: now,
       });
-      if (expiresAt !== undefined) {
+      if (
+        expiresAt !== undefined &&
+        expiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
+      ) {
         await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
           secretId,
           expiresAt,
@@ -189,7 +197,10 @@ export const put = mutation({
       expiredAt: undefined,
       updatedAt: now,
     });
-    if (expiresAt !== undefined) {
+    if (
+      expiresAt !== undefined &&
+      expiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
+    ) {
       await ctx.scheduler.runAt(expiresAt, internal.expiry.expire, {
         secretId: existing._id,
         expiresAt,
@@ -214,15 +225,15 @@ export const put = mutation({
 /**
  * Load and decrypt a secret value.
  *
- * Scheduled expiry invalidates reactive queries (ADR 0005). The clock also
- * rejects expired secrets before their job runs or an older row is swept.
+ * Scheduled expiry invalidates reactive queries (ADR 0005). Caller-supplied
+ * `now` also checks expiry before the job runs and for rows without a job.
  * Returns `not_found`, `expired`, or `key_unavailable` when unusable.
  */
 export const get = query({
   args: {
     namespace: v.optional(v.string()),
     name: v.string(),
-    /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
+    /** Time source for expiry checks on secrets without an expiredAt flag. */
     now: v.optional(v.number()),
   },
   returns: v.union(
@@ -249,7 +260,7 @@ export const get = query({
     if (secret === null) {
       return { ok: false as const, reason: "not_found" as const };
     }
-    if (isExpired(secret)) {
+    if (isExpired(secret, args.now)) {
       return { ok: false as const, reason: "expired" as const };
     }
     if (!hasVersion(secret.keyVersion)) {
@@ -300,15 +311,15 @@ const listItemValidator = v.object({
 /**
  * Paginate secrets in a namespace, newest-updated first.
  *
- * Each row carries `effectiveState` from stored expiry state and the server
- * clock (ADR 0005). The decrypted value is never included.
+ * Each row carries `effectiveState` from the stored flag and caller-supplied
+ * `now` (ADRs 0004 and 0005). The decrypted value is never included.
  */
 export const list = query({
   args: {
     namespace: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
     order: orderValidator,
-    /** @deprecated Accepted and ignored. Expiry uses stored state and the server clock. */
+    /** Time source for expiry checks on secrets without an expiredAt flag. */
     now: v.optional(v.number()),
   },
   returns: paginationResultValidator(listItemValidator),
@@ -339,7 +350,7 @@ export const list = query({
         createdAt: secret._creationTime,
         updatedAt: secret.updatedAt,
         expiresAt: secret.expiresAt,
-        effectiveState: isExpired(secret)
+        effectiveState: isExpired(secret, args.now)
           ? ("expired" as const)
           : ("active" as const),
         keyVersion: secret.keyVersion,
@@ -407,7 +418,11 @@ export const update = mutation({
       changed.push("ttl");
     }
     await ctx.db.patch("secrets", secret._id, patch);
-    if (args.ttlMs !== undefined && nextExpiresAt !== undefined) {
+    if (
+      args.ttlMs !== undefined &&
+      nextExpiresAt !== undefined &&
+      nextExpiresAt - now <= MAX_EXPIRY_SCHEDULE_DELAY_MS
+    ) {
       await ctx.scheduler.runAt(nextExpiresAt, internal.expiry.expire, {
         secretId: secret._id,
         expiresAt: nextExpiresAt,
