@@ -1,10 +1,12 @@
 import { ConvexError, v } from "convex/values";
-import { paginationOptsValidator } from "convex/server";
-import { paginator } from "convex-helpers/server/pagination";
+import {
+  paginationOptsValidator,
+  paginationResultValidator,
+  type PaginationOptions,
+} from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 import { api } from "./_generated/api.js";
-import schema from "./schema.js";
 import {
   effectiveStateValidator,
   metadataValidator,
@@ -20,6 +22,39 @@ import { eventMatchesFilter } from "./filters.js";
 /** Maximum plaintext value size — well under Convex's document limit. */
 const MAX_VALUE_BYTES = 64 * 1024;
 const byteCounter = new TextEncoder();
+
+function isLegacyCursor(cursor: string | null | undefined): boolean {
+  if (!cursor?.startsWith("[")) return false;
+  try {
+    const key: unknown = JSON.parse(cursor);
+    // convex-helpers serializes index values directly. Every old list index
+    // ends with numeric _creationTime and string _id; convex-test encodes
+    // each value as a string instead. "[]" is the helpers' end sentinel.
+    return (
+      Array.isArray(key) &&
+      (key.length === 0 ||
+        ((key.length === 3 || key.length === 4) &&
+          typeof key[0] === "string" &&
+          (key.length === 3 ||
+            typeof key[1] === "string" ||
+            typeof key[1] === "number") &&
+          typeof key[key.length - 2] === "number" &&
+          typeof key[key.length - 1] === "string"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function nativePaginationOptions(
+  options: PaginationOptions,
+): PaginationOptions {
+  return {
+    ...options,
+    cursor: isLegacyCursor(options.cursor) ? null : options.cursor,
+    endCursor: isLegacyCursor(options.endCursor) ? null : options.endCursor,
+  };
+}
 
 function assertValidNamespace(namespace: string | undefined): void {
   if (namespace === "") {
@@ -256,20 +291,16 @@ export const list = query({
     order: orderValidator,
     now: v.number(),
   },
-  returns: v.object({
-    page: v.array(listItemValidator),
-    isDone: v.boolean(),
-    continueCursor: v.string(),
-  }),
+  returns: paginationResultValidator(listItemValidator),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
-    const result = await paginator(ctx.db, schema)
+    const result = await ctx.db
       .query("secrets")
       .withIndex("by_namespace_and_updated_at", (q) =>
         q.eq("namespace", args.namespace),
       )
       .order(args.order ?? "desc")
-      .paginate(args.paginationOpts);
+      .paginate(nativePaginationOptions(args.paginationOpts));
 
     if (result.page.some((secret) => secret.namespace !== args.namespace)) {
       throw new ConvexError({
@@ -279,6 +310,7 @@ export const list = query({
     }
 
     return {
+      ...result,
       page: result.page.map((secret) => ({
         secretId: secret._id,
         namespace: secret.namespace,
@@ -292,8 +324,6 @@ export const list = query({
           : ("active" as const),
         keyVersion: secret.keyVersion,
       })),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
     };
   },
 });
@@ -428,11 +458,7 @@ export const listEvents = query({
     paginationOpts: paginationOptsValidator,
     order: orderValidator,
   },
-  returns: v.object({
-    page: v.array(eventItemValidator),
-    isDone: v.boolean(),
-    continueCursor: v.string(),
-  }),
+  returns: paginationResultValidator(eventItemValidator),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
     if (args.name !== undefined) {
@@ -457,33 +483,33 @@ export const listEvents = query({
     }
 
     const order = args.order ?? "desc";
-    const events = paginator(ctx.db, schema).query("secretEvents");
+    const events = ctx.db.query("secretEvents");
 
     let result;
     if (secretId !== undefined) {
       result = await events
         .withIndex("by_secret_id", (q) => q.eq("secretId", secretId))
         .order(order)
-        .paginate(args.paginationOpts);
+        .paginate(nativePaginationOptions(args.paginationOpts));
     } else if (name !== undefined) {
       result = await events
         .withIndex("by_namespace_and_name", (q) =>
           q.eq("namespace", namespace).eq("name", name),
         )
         .order(order)
-        .paginate(args.paginationOpts);
+        .paginate(nativePaginationOptions(args.paginationOpts));
     } else if (type !== undefined) {
       result = await events
         .withIndex("by_namespace_and_type", (q) =>
           q.eq("namespace", namespace).eq("type", type),
         )
         .order(order)
-        .paginate(args.paginationOpts);
+        .paginate(nativePaginationOptions(args.paginationOpts));
     } else {
       result = await events
         .withIndex("by_namespace", (q) => q.eq("namespace", namespace))
         .order(order)
-        .paginate(args.paginationOpts);
+        .paginate(nativePaginationOptions(args.paginationOpts));
     }
 
     if (
@@ -499,6 +525,7 @@ export const listEvents = query({
     }
 
     return {
+      ...result,
       page: result.page.map((event) => ({
         eventId: event._id,
         secretId: event.secretId,
@@ -508,9 +535,35 @@ export const listEvents = query({
         metadata: event.metadata,
         createdAt: event._creationTime,
       })),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
     };
+  },
+});
+
+/** Distinct key versions in use across the mounted store, in ascending order. */
+export const keyVersions = query({
+  args: {},
+  returns: v.array(v.number()),
+  handler: async (ctx) => {
+    const versions: number[] = [];
+    let secret = await ctx.db
+      .query("secrets")
+      .withIndex("by_key_version")
+      .first();
+    while (secret !== null) {
+      if (versions.length === 100) {
+        throw new ConvexError({
+          code: "invalid_argument",
+          message: "store exceeds 100 distinct key versions",
+        });
+      }
+      const version = secret.keyVersion;
+      versions.push(version);
+      secret = await ctx.db
+        .query("secrets")
+        .withIndex("by_key_version", (q) => q.gt("keyVersion", version))
+        .first();
+    }
+    return versions;
   },
 });
 

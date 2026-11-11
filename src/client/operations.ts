@@ -126,6 +126,7 @@ export class SecretStore<
   /**
    * Paginate secrets in a namespace, newest-updated first. Each row carries
    * `effectiveState`; the decrypted value is never included.
+   * A host query can make only one paginated call, including component calls.
    */
   async list(
     ctx: RunQueryCtx,
@@ -172,6 +173,7 @@ export class SecretStore<
   /**
    * Paginate audit events — by `secretId`, or by `namespace` optionally
    * narrowed with `name` or `type`.
+   * A host query can make only one paginated call, including component calls.
    */
   async listEvents(
     ctx: RunQueryCtx,
@@ -185,6 +187,11 @@ export class SecretStore<
       paginationOpts: args.paginationOpts,
       order: args.order,
     });
+  }
+
+  /** Distinct key versions in use across the store. At most 100 versions. */
+  async keyVersions(ctx: RunQueryCtx): Promise<number[]> {
+    return await ctx.runQuery(this.component.lib.keyVersions, {});
   }
 
   /**

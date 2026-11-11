@@ -1,11 +1,26 @@
 import { paginationOptsValidator } from "convex/server";
-import { mutation, query } from "./_generated/server.js";
+import {
+  mutation,
+  query,
+  type QueryCtx,
+  type MutationCtx,
+} from "./_generated/server.js";
 import { v } from "convex/values";
 import {
   environmentValidator,
   secrets,
   toNamespace,
 } from "./lib/secretStore.js";
+
+function namespaceForDemo(
+  _ctx: QueryCtx | MutationCtx,
+  workspace: string,
+  environment: Parameters<typeof toNamespace>[1],
+) {
+  // This demo has no auth. A real app must check the caller's workspace access
+  // here before returning a namespace.
+  return toNamespace(workspace, environment);
+}
 
 function maskSecret(value: string) {
   if (value.length <= 8) {
@@ -35,7 +50,7 @@ export const putSecret = mutation({
   },
   handler: async (ctx, args) => {
     return await secrets.put(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
       value: args.value,
       ttlMs: args.ttlMs,
@@ -52,7 +67,7 @@ export const removeSecret = mutation({
   returns: { removed: v.boolean() },
   handler: async (ctx, args) => {
     return await secrets.remove(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
     });
   },
@@ -66,7 +81,7 @@ export const listSecrets = query({
   },
   handler: async (ctx, args) => {
     return await secrets.list(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       paginationOpts: args.paginationOpts,
     });
   },
@@ -97,7 +112,7 @@ export const previewSecret = query({
   }),
   handler: async (ctx, args) => {
     const loaded = await secrets.get(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       name: args.name,
     });
 
@@ -136,12 +151,24 @@ export const listActivity = query({
     workspace: v.string(),
     environment: environmentValidator,
     paginationOpts: paginationOptsValidator,
+    type: v.optional(
+      v.union(
+        v.literal("created"),
+        v.literal("updated"),
+        v.literal("deleted"),
+        v.literal("rotated"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
-    return await secrets.listEvents(ctx, {
-      namespace: toNamespace(args.workspace, args.environment),
+    const options = {
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
       paginationOpts: args.paginationOpts,
-    });
+    };
+    return await secrets.listEvents(
+      ctx,
+      args.type === undefined ? options : { ...options, type: args.type },
+    );
   },
 });
 
@@ -155,6 +182,8 @@ export const getSettingsSnapshot = query({
     environment: environmentValidator,
   },
   returns: {
+    snapshotComplete: v.boolean(),
+    keyVersions: v.array(v.number()),
     totalSecrets: v.number(),
     expiredSecrets: v.number(),
     versionCounts: v.array(
@@ -163,37 +192,27 @@ export const getSettingsSnapshot = query({
     rotationComplete: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const rows: Array<{
-      keyVersion: number;
-      effectiveState: "active" | "expired";
-    }> = [];
-    let cursor: string | null = null;
-    while (true) {
-      const result = await secrets.list(ctx, {
-        namespace: toNamespace(args.workspace, args.environment),
-        paginationOpts: { numItems: 100, cursor },
-      });
-      rows.push(...result.page);
-      if (result.isDone) break;
-      cursor = result.continueCursor;
-    }
-
+    const result = await secrets.list(ctx, {
+      namespace: namespaceForDemo(ctx, args.workspace, args.environment),
+      paginationOpts: { numItems: 100, cursor: null },
+    });
     const versionCounts = new Map<number, number>();
     let expiredSecrets = 0;
-    for (const row of rows) {
+    for (const row of result.page) {
       versionCounts.set(
         row.keyVersion,
         (versionCounts.get(row.keyVersion) ?? 0) + 1,
       );
       if (row.effectiveState === "expired") expiredSecrets += 1;
     }
-
     return {
-      totalSecrets: rows.length,
+      totalSecrets: result.page.length,
       expiredSecrets,
       versionCounts: Array.from(versionCounts.entries())
         .map(([keyVersion, count]) => ({ keyVersion, count }))
         .sort((a, b) => a.keyVersion - b.keyVersion),
+      snapshotComplete: result.isDone,
+      keyVersions: await secrets.keyVersions(ctx),
       rotationComplete: await secrets.isRotationComplete(ctx),
     };
   },
@@ -244,7 +263,7 @@ export const seedDemoData = mutation({
   },
   returns: { seeded: v.number() },
   handler: async (ctx, args) => {
-    const namespace = toNamespace(args.workspace, args.environment);
+    const namespace = namespaceForDemo(ctx, args.workspace, args.environment);
     const demoSecrets = [
       {
         name: "DATABASE_URL",

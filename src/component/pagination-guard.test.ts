@@ -4,25 +4,6 @@ import { initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
 import { resetKeyConfig } from "./keys.js";
 
-// Stands in for a paginator that lets a cursor reach rows outside the index
-// range, as convex-helpers before 0.1.134 did.
-const foreignRow = vi.hoisted(() => ({
-  current: undefined as Record<string, unknown> | undefined,
-}));
-
-vi.mock("convex-helpers/server/pagination", () => {
-  const chain = {
-    withIndex: () => chain,
-    order: () => chain,
-    paginate: async () => ({
-      page: [foreignRow.current],
-      isDone: true,
-      continueCursor: "end",
-    }),
-  };
-  return { paginator: () => ({ query: () => chain }) };
-});
-
 beforeEach(() => {
   resetKeyConfig();
   process.env.SECRET_STORE_KEYS = defineKeys({
@@ -31,6 +12,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   resetKeyConfig();
   delete process.env.SECRET_STORE_KEYS;
 });
@@ -44,7 +26,20 @@ const cursorError = {
 
 test("list refuses a page holding another namespace's secret", async () => {
   const t = initConvexTest();
-  foreignRow.current = { namespace: "a-victim", name: "private-name" };
+  const { secretId } = await t.mutation(api.lib.put, {
+    namespace: "a-victim",
+    name: "private-name",
+    value: "v",
+  });
+  await t.run(async (ctx) => {
+    const foreignRow = await ctx.db.get("secrets", secretId);
+    const query = ctx.db.query("secrets").order("asc");
+    vi.spyOn(Object.getPrototypeOf(query), "paginate").mockResolvedValue({
+      page: [foreignRow],
+      isDone: true,
+      continueCursor: "end",
+    });
+  });
   await expect(
     t.query(api.lib.list, {
       namespace: "z-attacker",
@@ -56,11 +51,20 @@ test("list refuses a page holding another namespace's secret", async () => {
 
 test("listEvents refuses a page holding an event outside the filter", async () => {
   const t = initConvexTest();
-  foreignRow.current = {
+  await t.mutation(api.lib.put, {
     namespace: "z-attacker",
     name: "public-name",
-    type: "created",
-  };
+    value: "v",
+  });
+  await t.run(async (ctx) => {
+    const foreignRow = await ctx.db.query("secretEvents").first();
+    const query = ctx.db.query("secretEvents").order("asc");
+    vi.spyOn(Object.getPrototypeOf(query), "paginate").mockResolvedValue({
+      page: [foreignRow],
+      isDone: true,
+      continueCursor: "end",
+    });
+  });
   await expect(
     t.query(api.lib.listEvents, {
       namespace: "z-attacker",

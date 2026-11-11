@@ -1,10 +1,28 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  test,
+  vi,
+} from "vitest";
 import { ConvexError } from "convex/values";
 import { SecretStore, isSecretStoreError } from "./index.js";
 import { components, initConvexTest } from "./setup.test.js";
 import { defineKeys } from "../keys-format.js";
 import { resetKeyConfig } from "../component/keys.js";
-import type { RunMutationCtx, RunQueryCtx } from "./types.js";
+import type {
+  PaginationOptions as NativePaginationOptions,
+  PaginationResult,
+} from "convex/server";
+import type {
+  PaginationOptions,
+  ListItem,
+  ListResult,
+  RunMutationCtx,
+  RunQueryCtx,
+} from "./types.js";
 
 const RAW_V1 = Buffer.alloc(32, 1).toString("base64");
 const RAW_V2 = Buffer.alloc(32, 2).toString("base64");
@@ -284,6 +302,86 @@ describe("SecretStore facade", () => {
     expect(result.page[0]?.effectiveState).toBe("active");
   });
 
+  test("host pages through every secret exactly once with native cursors", async () => {
+    const t = initConvexTest();
+    const { mutationCtx, queryCtx } = ctxFrom(t);
+    const secrets = new SecretStore(components.secretStore);
+    const expected = [];
+    for (let i = 0; i < 5; i++) {
+      const { secretId } = await secrets.put(mutationCtx, {
+        namespace: "workspace",
+        name: `secret-${i}`,
+        value: "v",
+      });
+      expected.push(secretId);
+    }
+    let cursor: string | null = null;
+    let isDone = false;
+    const seen = [];
+    for (let page = 0; !isDone && page < 4; page++) {
+      const result = await secrets.list(queryCtx, {
+        namespace: "workspace",
+        paginationOpts: { numItems: 2, cursor },
+      });
+      seen.push(...result.page.map((row) => row.secretId));
+      cursor = result.continueCursor;
+      isDone = result.isDone;
+    }
+    expect(isDone).toBe(true);
+    expect(seen.sort()).toEqual(expected.sort());
+  });
+
+  test.each(["unfiltered", "name", "type", "secretId"] as const)(
+    "host pages through every audit event exactly once with %s native cursors",
+    async (filter) => {
+      const t = initConvexTest();
+      const { mutationCtx, queryCtx } = ctxFrom(t);
+      const secrets = new SecretStore(components.secretStore);
+      const { secretId } = await secrets.put(mutationCtx, {
+        namespace: "workspace",
+        name: "secret",
+        value: "v",
+      });
+      for (let i = 0; i < 5; i++) {
+        await secrets.put(mutationCtx, {
+          namespace: "workspace",
+          name: "secret",
+          value: `v${i}`,
+        });
+      }
+      const filters =
+        filter === "secretId"
+          ? { secretId }
+          : filter === "name"
+            ? { namespace: "workspace", name: "secret" }
+            : filter === "type"
+              ? { namespace: "workspace", type: "updated" as const }
+              : { namespace: "workspace" };
+      const expected = await secrets.listEvents(queryCtx, {
+        ...filters,
+        paginationOpts: { numItems: 10, cursor: null },
+      });
+      expect(expected.page).toHaveLength(filter === "type" ? 5 : 6);
+      let cursor: string | null = null;
+      let isDone = false;
+      const seen = [];
+      for (let page = 0; !isDone && page < 5; page++) {
+        const result = await secrets.listEvents(queryCtx, {
+          ...filters,
+          paginationOpts: { numItems: 2, cursor },
+        });
+        seen.push(...result.page.map((row) => row.eventId));
+        cursor = result.continueCursor;
+        isDone = result.isDone;
+      }
+      expect(isDone).toBe(true);
+      expect(seen.sort()).toEqual(
+        expected.page.map((row) => row.eventId).sort(),
+      );
+      expect(new Set(seen).size).toBe(seen.length);
+    },
+  );
+
   test("rotate and isRotationComplete work through the facade", async () => {
     const t = initConvexTest();
     const { mutationCtx, queryCtx } = ctxFrom(t);
@@ -315,4 +413,52 @@ describe("SecretStore facade", () => {
     const eventsResult = await secrets.cleanupEvents(mutationCtx);
     expect(eventsResult).toEqual({ deleted: 0, isDone: true });
   });
+});
+
+test("pagination types accept native options and preserve optional result fields", () => {
+  expectTypeOf<PaginationOptions>().toEqualTypeOf<NativePaginationOptions>();
+  expectTypeOf<ListResult<Record<string, unknown>>>().toExtend<
+    PaginationResult<ListItem<Record<string, unknown>>>
+  >();
+  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
+    "splitCursor",
+  );
+  expectTypeOf<ListResult<Record<string, unknown>>>().toHaveProperty(
+    "pageStatus",
+  );
+});
+
+test.each(["list", "listEvents"] as const)(
+  "%s forwards native options and split results",
+  async (operation) => {
+    const paginationOpts: PaginationOptions = {
+      numItems: 10,
+      cursor: "start",
+      endCursor: "end",
+      maximumRowsRead: 20,
+      maximumBytesRead: 1024,
+    };
+    const result = {
+      page: [],
+      isDone: false,
+      continueCursor: "end",
+      splitCursor: "middle",
+      pageStatus: "SplitRequired" as const,
+    };
+    const runQuery = vi.fn().mockResolvedValue(result);
+    const store = new SecretStore(components.secretStore);
+    expect(await store[operation]({ runQuery }, { paginationOpts })).toEqual(
+      result,
+    );
+    expect(runQuery.mock.calls[0]?.[1]).toMatchObject({ paginationOpts });
+  },
+);
+
+test("keyVersions reports versions in use through the facade", async () => {
+  const t = initConvexTest();
+  const { mutationCtx, queryCtx } = ctxFrom(t);
+  const store = new SecretStore(components.secretStore);
+  expect(await store.keyVersions(queryCtx)).toEqual([]);
+  await store.put(mutationCtx, { name: "one", value: "v" });
+  expect(await store.keyVersions(queryCtx)).toEqual([1]);
 });

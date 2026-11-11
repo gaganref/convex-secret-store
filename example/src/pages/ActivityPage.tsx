@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -29,26 +29,30 @@ export function ActivityPage({
   workspace: string;
   environment: Environment;
 }) {
-  const activity = useQuery(api.example.listActivity, {
-    workspace,
-    environment,
-    paginationOpts: { numItems: 60, cursor: null },
-  });
   const [typeFilter, setTypeFilter] = useState<EventFilter>("all");
+  const {
+    results: activity,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.example.listActivity,
+    {
+      workspace,
+      environment,
+      type: typeFilter === "all" ? undefined : typeFilter,
+    },
+    { initialNumItems: 50 },
+  );
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
-  type ActivityRow = NonNullable<
-    ReturnType<typeof useQuery<typeof api.example.listActivity>>
-  >["page"][number];
+  type ActivityRow = (typeof activity)[number];
 
   const filtered = useMemo(() => {
-    const rows = activity?.page ?? [];
-    return rows.filter((event: ActivityRow) => {
-      if (typeFilter !== "all" && event.type !== typeFilter) return false;
+    return activity.filter((event: ActivityRow) => {
       if (deferredSearch.length === 0) return true;
       return event.name.toLowerCase().includes(deferredSearch);
     });
-  }, [activity, deferredSearch, typeFilter]);
+  }, [activity, deferredSearch]);
 
   function badgeVariant(type: string) {
     switch (type) {
@@ -92,7 +96,7 @@ export function ActivityPage({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter by secret name..."
+          placeholder="Filter loaded events by name..."
           className="h-7 border border-border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-48"
         />
         <div className="flex flex-wrap gap-1">
@@ -110,8 +114,13 @@ export function ActivityPage({
         </div>
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        Name search applies to the {activity.length} loaded events. Type filters
+        apply to all events.
+      </p>
+
       {/* Event list */}
-      {activity === undefined ? (
+      {status === "LoadingFirstPage" ? (
         <div
           className="flex items-center justify-center py-12 text-muted-foreground gap-2"
           role="status"
@@ -125,7 +134,9 @@ export function ActivityPage({
           <EmptyHeader>
             <EmptyTitle>No matching events</EmptyTitle>
             <EmptyDescription>
-              Add a secret to start the audit trail for this scope.
+              {activity.length === 0
+                ? "No events match this type. Choose another type or add a secret."
+                : "Change the filters to find activity in the loaded events."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -168,6 +179,15 @@ export function ActivityPage({
             </div>
           ))}
         </div>
+      )}
+      {(status === "CanLoadMore" || status === "LoadingMore") && (
+        <Button
+          variant="outline"
+          onClick={() => loadMore(50)}
+          disabled={status === "LoadingMore"}
+        >
+          {status === "LoadingMore" ? "Loading events..." : "Load more events"}
+        </Button>
       )}
     </div>
   );
