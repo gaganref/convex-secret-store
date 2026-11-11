@@ -427,7 +427,8 @@ By default the recommended rotation flow is one-shot — call
 `isRotationComplete()` before retiring the old one (see
 [Key rotation](#key-rotation)). If you'd rather not remember the manual step,
 add a slow rotation cron as a safety net. It's a no-op when nothing's stale
-(one indexed `.first()` query — cheap) and picks up any backlog automatically:
+(one indexed `.first()` probe per distinct key version) and picks up any
+backlog automatically:
 
 ```ts
 // convex/crons.ts (in addition to the cleanup crons above)

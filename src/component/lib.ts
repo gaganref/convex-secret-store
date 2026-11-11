@@ -1,9 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import {
-  paginationOptsValidator,
-  paginationResultValidator,
-  type PaginationOptions,
-} from "convex/server";
+import { paginationOptsValidator, type PaginationOptions } from "convex/server";
 import { mutation, query } from "./_generated/server.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 import {
@@ -303,7 +299,11 @@ export const list = query({
     /** Time source for expiry checks on secrets without an expiredAt flag. */
     now: v.optional(v.number()),
   },
-  returns: paginationResultValidator(listItemValidator),
+  returns: v.object({
+    page: v.array(listItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
     const result = await ctx.db
@@ -322,7 +322,6 @@ export const list = query({
     }
 
     return {
-      ...result,
       page: result.page.map((secret) => ({
         secretId: secret._id,
         namespace: secret.namespace,
@@ -336,6 +335,8 @@ export const list = query({
           : ("active" as const),
         keyVersion: secret.keyVersion,
       })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
     };
   },
 });
@@ -473,7 +474,11 @@ export const listEvents = query({
     paginationOpts: paginationOptsValidator,
     order: orderValidator,
   },
-  returns: paginationResultValidator(eventItemValidator),
+  returns: v.object({
+    page: v.array(eventItemValidator),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: async (ctx, args) => {
     assertValidNamespace(args.namespace);
     if (args.name !== undefined) {
@@ -540,7 +545,6 @@ export const listEvents = query({
     }
 
     return {
-      ...result,
       page: result.page.map((event) => ({
         eventId: event._id,
         secretId: event.secretId,
@@ -550,6 +554,8 @@ export const listEvents = query({
         metadata: event.metadata,
         createdAt: event._creationTime,
       })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
     };
   },
 });
