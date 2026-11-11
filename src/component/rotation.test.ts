@@ -104,3 +104,27 @@ test("rotation drains 100 secrets with 256 KiB metadata inside transaction limit
   await t.finishAllScheduledFunctions(vi.runAllTimers);
   expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
 });
+
+test("restoring an older key mid-chain restarts the scan with the same active version", async () => {
+  const t = initConvexTest();
+  await t.mutation(api.lib.put, { name: "restored", value: "kept" });
+  keys({ 2: V2 });
+  for (let i = 0; i < 105; i++) {
+    await t.mutation(api.lib.put, { name: `healthy-${i}`, value: "kept" });
+  }
+  const V3 = Buffer.alloc(32, 3).toString("base64");
+  keys({ 2: V2, 3: V3 });
+  expect(await t.mutation(api.lib.rotate, {})).toMatchObject({
+    rotated: 100,
+    isDone: false,
+  });
+  keys({ 1: V1, 2: V2, 3: V3 });
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await t.query(api.lib.keyVersions, {})).toEqual([3]);
+  expect(await t.query(api.lib.isRotationComplete, {})).toBe(true);
+  expect(await t.mutation(api.lib.rotate, {})).toEqual({
+    rotated: 0,
+    skipped: 0,
+    isDone: true,
+  });
+});
