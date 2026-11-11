@@ -33,6 +33,17 @@ reused or reordered.
 The KEK version used to wrap DEKs for new writes — always the highest
 configured version.
 
+**Orphan key version**:
+A key version that stored secrets still use but that `SECRET_STORE_KEYS` no
+longer contains. Its secrets read as `key_unavailable`, and rotation leaves them
+untouched until the KEK returns or the secrets are removed.
+_Avoid_: retired key (a retired key has no secrets left), missing key
+
+**Key binding by reference**:
+Passing `app.env.SECRET_STORE_KEYS` to the component in `convex.config.ts`, so a
+change made with `npx convex env set` takes effect without a push. The
+alternative, `defineKeys(...)`, fixes the key values at push time.
+
 **Key rotation**:
 Rewrapping a secret's DEK under a newer KEK version, without re-encrypting the
 plaintext value.
@@ -40,6 +51,13 @@ _Avoid_: using "rotation" for replacing a secret's value (see Flagged ambiguitie
 
 **Expiry**:
 The absolute time after which a secret is no longer usable. Optional per secret.
+
+**Expiry flip**:
+The scheduled mutation that marks a secret expired at its expiry time, so
+subscribed queries rerun and show it as expired. It records no audit event.
+Reads also check expiry against the caller's `now`, so a secret with no flip
+scheduled still reads as expired.
+_Avoid_: expiration event
 
 **Audit event**:
 An append-only record of a create, update, delete, or rotate operation.
