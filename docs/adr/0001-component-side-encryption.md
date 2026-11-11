@@ -25,3 +25,10 @@ compile-time-guaranteed key configuration, no host-side key management, and
 KEKs and all configuration live in environment variables, **never in a component
 table** — master keys must not be persisted alongside the ciphertext they
 protect. The component's tables hold data (`secrets`, `secretEvents`) only.
+
+## Correction, 2026-11
+
+In 0.1, the package's host-side class received plaintext and loaded the KEK
+(`src/client/operations.ts` at `v0.1.0`). A malicious package could access both.
+Supply-chain exposure is the same in both designs, as the
+[security model](../security.md#why-the-component-does-the-encryption) explains.

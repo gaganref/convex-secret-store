@@ -12,7 +12,7 @@ export const secretsFields = {
   keyVersion: v.number(),
   metadata: v.optional(metadataValidator),
   expiresAt: v.optional(v.number()),
-  // Reserved for 0.3.0 rollback compatibility.
+  // Set by the scheduled expiry flip; cleared when the secret is rewritten.
   expiredAt: v.optional(v.number()),
   updatedAt: v.number(),
 };
